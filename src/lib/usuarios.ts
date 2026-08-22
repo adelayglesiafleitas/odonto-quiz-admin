@@ -65,6 +65,31 @@ export async function listarUsuarios(): Promise<Usuario[]> {
   })
 }
 
+// RLS ("Solo admins agregan/quitan admins") ya exige que quien ejecuta esto
+// sea admin — ver migración admins_pueden_gestionar_admins. Sin esas
+// políticas estos dos insert/delete simplemente fallarían silenciosamente
+// (RLS deniega por defecto).
+export async function otorgarAdmin(userId: string): Promise<{ ok: boolean }> {
+  const { error } = await supabase.from('admins').insert({ user_id: userId })
+  // 23505 = ya existe la fila (por ejemplo, la lista de usuarios estaba
+  // desactualizada y ya era admin) — el estado que se buscaba ya es el
+  // real, así que no tiene sentido tratarlo como un error.
+  if (error && error.code !== '23505') {
+    console.error('Error al otorgar admin:', error.message)
+    return { ok: false }
+  }
+  return { ok: true }
+}
+
+export async function revocarAdmin(userId: string): Promise<{ ok: boolean }> {
+  const { error } = await supabase.from('admins').delete().eq('user_id', userId)
+  if (error) {
+    console.error('Error al quitar admin:', error.message)
+    return { ok: false }
+  }
+  return { ok: true }
+}
+
 const TLDS_CONOCIDOS = new Set([
   'com', 'net', 'org', 'edu', 'gov', 'info', 'io', 'co',
   'es', 'mx', 'ar', 'cl', 'pe', 'uy', 've', 'cu', 'do', 'pr', 'bo', 'ec', 'py',

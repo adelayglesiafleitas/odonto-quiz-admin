@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { Search, TriangleAlert, Loader2, Users as UsersIcon } from 'lucide-react'
-import { emailPareceSospechoso, type Usuario } from '@/lib/usuarios'
+import { Search, TriangleAlert, Loader2, Users as UsersIcon, AlertCircle } from 'lucide-react'
+import { emailPareceSospechoso, otorgarAdmin, revocarAdmin, type Usuario } from '@/lib/usuarios'
 
 type FiltroRol = 'todos' | 'admin' | 'user'
 type FiltroActividad = 'todos' | 'con' | 'sin'
@@ -14,10 +14,29 @@ function fmt(fecha: string | null): string {
 const inputBase =
   'h-10 rounded-xl border border-border bg-card px-3 text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
 
-export function Usuarios({ usuarios, cargando }: { usuarios: Usuario[]; cargando: boolean }) {
+interface Props {
+  usuarios: Usuario[]
+  cargando: boolean
+  miPropioId: string
+  onRecargar: () => void
+}
+
+export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) {
   const [busqueda, setBusqueda] = useState('')
   const [rol, setRol] = useState<FiltroRol>('todos')
   const [actividad, setActividad] = useState<FiltroActividad>('todos')
+
+  const [procesandoId, setProcesandoId] = useState<string | null>(null)
+  const [errorAccion, setErrorAccion] = useState<string | null>(null)
+
+  async function manejarCambioRol(userId: string, accion: 'otorgar' | 'quitar') {
+    setProcesandoId(userId)
+    setErrorAccion(null)
+    const resultado = accion === 'otorgar' ? await otorgarAdmin(userId) : await revocarAdmin(userId)
+    setProcesandoId(null)
+    if (resultado.ok) onRecargar()
+    else setErrorAccion('No se pudo actualizar el rol. Probá de nuevo en un momento.')
+  }
 
   const stats = useMemo(() => {
     const haceUnaSemana = Date.now() - 7 * 24 * 60 * 60 * 1000
@@ -94,6 +113,13 @@ export function Usuarios({ usuarios, cargando }: { usuarios: Usuario[]; cargando
         {cargando ? 'Cargando…' : hayFiltros ? `${filtrados.length} de ${usuarios.length} usuarios` : `${usuarios.length} usuarios`}
       </p>
 
+      {errorAccion && (
+        <div className="mb-3 flex items-center gap-2 rounded-xl bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {errorAccion}
+        </div>
+      )}
+
       <div className="overflow-hidden rounded-2xl border border-border bg-card">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] border-collapse">
@@ -144,11 +170,12 @@ export function Usuarios({ usuarios, cargando }: { usuarios: Usuario[]; cargando
                       {u.promedio === null ? '—' : `${u.promedio}%`}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">
-                      {u.esAdmin ? (
-                        <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary">Admin</span>
-                      ) : (
-                        <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold text-muted-foreground">Usuario</span>
-                      )}
+                      <RolCelda
+                        usuario={u}
+                        esUnoMismo={u.id === miPropioId}
+                        procesando={procesandoId === u.id}
+                        onCambiar={(accion) => manejarCambioRol(u.id, accion)}
+                      />
                     </td>
                   </tr>
                 ))
@@ -176,5 +203,50 @@ function StatCard({ etiqueta, valor, cargando }: { etiqueta: string; valor: numb
       <div className="font-mono text-2xl font-extrabold tabular-nums text-foreground">{cargando ? '—' : valor}</div>
       <div className="mt-0.5 text-xs font-semibold text-muted-foreground">{etiqueta}</div>
     </div>
+  )
+}
+
+// El pill de "Rol" es a la vez el estado y el control: un click lo cambia
+// directo (insert/delete real en `admins`, sin paso intermedio). Vos mismo
+// no podés quitarte el rol a vos mismo (botón deshabilitado) para no
+// quedarte afuera del panel por accidente.
+function RolCelda({
+  usuario,
+  esUnoMismo,
+  procesando,
+  onCambiar,
+}: {
+  usuario: Usuario
+  esUnoMismo: boolean
+  procesando: boolean
+  onCambiar: (accion: 'otorgar' | 'quitar') => void
+}) {
+  if (procesando) {
+    return <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+  }
+
+  if (usuario.esAdmin) {
+    return (
+      <button
+        type="button"
+        onClick={() => onCambiar('quitar')}
+        disabled={esUnoMismo}
+        title={esUnoMismo ? 'No podés quitarte el rol de admin a vos mismo' : 'Click para quitar el rol de admin'}
+        className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary transition hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:bg-primary/10 disabled:hover:text-primary"
+      >
+        Admin
+      </button>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => onCambiar('otorgar')}
+      title="Click para hacer admin"
+      className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold text-muted-foreground transition hover:bg-primary/10 hover:text-primary"
+    >
+      Usuario
+    </button>
   )
 }

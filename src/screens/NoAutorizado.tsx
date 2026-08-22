@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button'
+import { TemaToggle } from '@/components/TemaToggle'
 import { supabase } from '@/lib/supabase'
 import { ShieldAlert } from 'lucide-react'
 
@@ -8,7 +9,10 @@ import { ShieldAlert } from 'lucide-react'
 // sin esta pantalla vería un panel vacío sin explicación.
 export function NoAutorizado() {
   return (
-    <div className="app-shell flex flex-col items-center justify-center gap-4 bg-background px-6 text-center">
+    <div className="app-shell relative flex flex-col items-center justify-center gap-4 bg-background px-6 text-center">
+      <div className="absolute right-5 top-5">
+        <TemaToggle />
+      </div>
       <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-destructive/10 text-destructive">
         <ShieldAlert className="h-7 w-7" />
       </span>

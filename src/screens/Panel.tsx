@@ -52,7 +52,7 @@ export function Panel({ correo, userId }: { correo: string; userId: string }) {
       <AdminSidebar vista={vista} onCambiarVista={setVista} correo={correo} pendientes={pendientes} />
       <main className="min-w-0 flex-1 px-5 py-6 md:px-9 md:py-9">
         {vista === 'usuarios' ? (
-          <Usuarios usuarios={usuarios} cargando={cargandoUsuarios} />
+          <Usuarios usuarios={usuarios} cargando={cargandoUsuarios} miPropioId={userId} onRecargar={recargarUsuarios} />
         ) : (
           <AtencionCliente
             feedback={feedback}

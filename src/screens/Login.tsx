@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
+import { TemaToggle } from '@/components/TemaToggle'
 import { supabase } from '@/lib/supabase'
 import { Eye, EyeOff, Lock, Mail, AlertCircle, ShieldCheck } from 'lucide-react'
 
@@ -41,6 +42,10 @@ export function Login() {
     <div className="brand-gradient app-shell relative flex flex-col items-center justify-center overflow-hidden px-6 py-10">
       <div className="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full bg-white/5 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-28 -left-16 h-72 w-72 rounded-full bg-[#1fc6c6]/10 blur-3xl" />
+
+      <div className="absolute right-5 top-5">
+        <TemaToggle sobreOscuro />
+      </div>
 
       <div className="mb-8 flex flex-col items-center gap-3 animate-float-up">
         <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10 text-white">

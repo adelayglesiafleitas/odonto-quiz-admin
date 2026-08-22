@@ -1,5 +1,6 @@
 import { ShieldCheck, Users, Inbox, LogOut } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { TemaToggle } from './TemaToggle'
 
 export type Vista = 'usuarios' | 'atencion'
 
@@ -54,22 +55,25 @@ export function AdminSidebar({ vista, onCambiarVista, correo, pendientes }: Prop
         })}
       </nav>
 
-      <button
-        type="button"
-        onClick={() => supabase.auth.signOut()}
-        aria-label="Cerrar sesión"
-        title="Cerrar sesión"
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground hover:bg-muted hover:text-destructive md:hidden"
-      >
-        <LogOut className="h-[18px] w-[18px]" />
-      </button>
+      <div className="flex shrink-0 items-center gap-1 md:hidden">
+        <TemaToggle />
+        <button
+          type="button"
+          onClick={() => supabase.auth.signOut()}
+          aria-label="Cerrar sesión"
+          title="Cerrar sesión"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground hover:bg-muted hover:text-destructive"
+        >
+          <LogOut className="h-[18px] w-[18px]" />
+        </button>
+      </div>
 
       <div className="mt-auto hidden border-t border-border pt-3.5 md:block">
         <div className="flex items-center gap-2.5">
           <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-full bg-accent/15 text-xs font-extrabold text-accent">
             {inicial}
           </span>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <p className="truncate text-xs font-semibold text-foreground">{correo}</p>
             <button
               type="button"
@@ -80,6 +84,7 @@ export function AdminSidebar({ vista, onCambiarVista, correo, pendientes }: Prop
               Cerrar sesión
             </button>
           </div>
+          <TemaToggle className="h-8 w-8" />
         </div>
       </div>
     </aside>
