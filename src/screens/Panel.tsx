@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
 import { AdminSidebar, type Vista } from '@/components/AdminSidebar'
 import { listarUsuarios, type Usuario } from '@/lib/usuarios'
-import { listarFeedback, type FeedbackItem } from '@/lib/feedbackAdmin'
+import { listarTodosTickets, contarNoLeidos, suscribirseATickets, type Ticket } from '@/lib/tickets'
 import { Usuarios } from './Usuarios'
 import { AtencionCliente } from './AtencionCliente'
 
@@ -17,34 +16,26 @@ export function Panel({ correo, userId }: { correo: string; userId: string }) {
     setCargandoUsuarios(false)
   }, [])
 
-  const [feedback, setFeedback] = useState<FeedbackItem[]>([])
-  const [cargandoFeedback, setCargandoFeedback] = useState(true)
-  const recargarFeedback = useCallback(async () => {
-    setFeedback(await listarFeedback())
-    setCargandoFeedback(false)
+  const [tickets, setTickets] = useState<Ticket[]>([])
+  const [cargandoTickets, setCargandoTickets] = useState(true)
+  const recargarTickets = useCallback(async () => {
+    setTickets(await listarTodosTickets())
+    setCargandoTickets(false)
   }, [])
 
   useEffect(() => {
     recargarUsuarios()
-    recargarFeedback()
+    recargarTickets()
 
-    // La tabla `feedback` ya tiene Realtime habilitado (migración
-    // add_feedback_table) — se aprovecha acá para que la cola y el badge
-    // del sidebar se actualicen solos si otro admin resuelve un caso, o si
-    // llega un reporte nuevo, sin tener que refrescar la página.
-    const canal = supabase
-      .channel('admin-feedback')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'feedback' }, () => {
-        recargarFeedback()
-      })
-      .subscribe()
+    // `tickets` ya tiene Realtime habilitado (migración
+    // crear_tickets_mensajes) — el trigger de la base actualiza la fila del
+    // ticket cada vez que llega un mensaje nuevo, así que suscribirse solo
+    // a esta tabla alcanza para que la bandeja y el badge del sidebar se
+    // refresquen solos, sin recargar la página.
+    return suscribirseATickets(recargarTickets)
+  }, [recargarUsuarios, recargarTickets])
 
-    return () => {
-      supabase.removeChannel(canal)
-    }
-  }, [recargarUsuarios, recargarFeedback])
-
-  const pendientes = feedback.filter((f) => f.estado === 'pendiente' || f.estado === 'en_revision').length
+  const pendientes = contarNoLeidos(tickets)
   const correosPorId = new Map(usuarios.map((u) => [u.id, u.email] as const))
 
   return (
@@ -55,11 +46,11 @@ export function Panel({ correo, userId }: { correo: string; userId: string }) {
           <Usuarios usuarios={usuarios} cargando={cargandoUsuarios} miPropioId={userId} onRecargar={recargarUsuarios} />
         ) : (
           <AtencionCliente
-            feedback={feedback}
-            cargando={cargandoFeedback}
+            tickets={tickets}
+            cargando={cargandoTickets}
             correosPorId={correosPorId}
             adminId={userId}
-            onRecargar={recargarFeedback}
+            onRecargar={recargarTickets}
           />
         )}
       </main>
