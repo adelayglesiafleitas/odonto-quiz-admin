@@ -90,6 +90,33 @@ export async function revocarAdmin(userId: string): Promise<{ ok: boolean }> {
   return { ok: true }
 }
 
+// Dispara el flujo estándar de Supabase Auth (manda un correo con el enlace
+// para elegir contraseña nueva). No requiere permisos especiales — cualquier
+// cuenta autenticada puede llamarlo para cualquier email, así que la
+// protección real acá es de UI: solo se ofrece desde el menú de acciones del
+// panel admin.
+export async function restablecerContrasena(email: string): Promise<{ ok: boolean }> {
+  const { error } = await supabase.auth.resetPasswordForEmail(email)
+  if (error) {
+    console.error('Error al enviar el enlace de restablecimiento:', error.message)
+    return { ok: false }
+  }
+  return { ok: true }
+}
+
+// admin_eliminar_usuario() (migración admin_eliminar_usuario) ya valida que
+// quien llama sea admin y que no se esté eliminando a sí mismo — acá solo se
+// propaga el resultado. Al ser SECURITY DEFINER, hace el `delete from
+// auth.users` con privilegios que el anon key nunca tiene.
+export async function eliminarUsuario(userId: string): Promise<{ ok: boolean }> {
+  const { error } = await supabase.rpc('admin_eliminar_usuario', { objetivo_id: userId })
+  if (error) {
+    console.error('Error al eliminar usuario:', error.message)
+    return { ok: false }
+  }
+  return { ok: true }
+}
+
 const TLDS_CONOCIDOS = new Set([
   'com', 'net', 'org', 'edu', 'gov', 'info', 'io', 'co',
   'es', 'mx', 'ar', 'cl', 'pe', 'uy', 've', 'cu', 'do', 'pr', 'bo', 'ec', 'py',

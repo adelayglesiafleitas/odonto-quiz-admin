@@ -1,6 +1,26 @@
-import { useMemo, useState } from 'react'
-import { Search, TriangleAlert, Loader2, Users as UsersIcon, AlertCircle } from 'lucide-react'
-import { emailPareceSospechoso, otorgarAdmin, revocarAdmin, type Usuario } from '@/lib/usuarios'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  Search,
+  TriangleAlert,
+  Loader2,
+  Users as UsersIcon,
+  AlertCircle,
+  EllipsisVertical,
+  KeyRound,
+  Shield,
+  Trash2,
+  Info,
+} from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { PanelEstadisticasUsuario } from '@/components/PanelEstadisticasUsuario'
+import {
+  emailPareceSospechoso,
+  otorgarAdmin,
+  revocarAdmin,
+  restablecerContrasena,
+  eliminarUsuario,
+  type Usuario,
+} from '@/lib/usuarios'
 
 type FiltroRol = 'todos' | 'admin' | 'user'
 type FiltroActividad = 'todos' | 'con' | 'sin'
@@ -21,6 +41,94 @@ interface Props {
   onRecargar: () => void
 }
 
+// Toda acción que escribe algo en la base (cambiar rol, mandar el enlace de
+// contraseña, eliminar la cuenta) pasa primero por este modal de
+// confirmación — nada se aplica con un solo click. `variant` define el tono:
+// destructive para lo irreversible, accent para el cambio de rol (mismo
+// color que el pill de Admin), info para lo que es solo un aviso/envío.
+type TipoConfirmacion = 'otorgar' | 'quitar' | 'reset' | 'eliminar'
+
+interface Confirmacion {
+  tipo: TipoConfirmacion
+  usuario: Usuario
+}
+
+interface ConfigConfirmacion {
+  variant: 'destructive' | 'accent' | 'info'
+  icono: typeof Shield
+  titulo: string
+  descripcion: ReactNode
+  nota: string
+  botonLabel: string
+  botonCargando: string
+}
+
+function configPara(confirmacion: Confirmacion): ConfigConfirmacion {
+  const { tipo, usuario } = confirmacion
+  switch (tipo) {
+    case 'otorgar':
+      return {
+        variant: 'accent',
+        icono: Shield,
+        titulo: '¿Dar permisos de administrador?',
+        descripcion: (
+          <>
+            <strong className="font-mono font-semibold text-foreground">{usuario.email}</strong> va a poder ver y gestionar todo el
+            panel — usuarios, pagos y soporte, igual que vos.
+          </>
+        ),
+        nota: 'Podés revertirlo cuando quieras desde este mismo menú.',
+        botonLabel: 'Dar admin',
+        botonCargando: 'Guardando…',
+      }
+    case 'quitar':
+      return {
+        variant: 'accent',
+        icono: Shield,
+        titulo: '¿Quitar permisos de administrador?',
+        descripcion: (
+          <>
+            <strong className="font-mono font-semibold text-foreground">{usuario.email}</strong> deja de tener acceso al panel de
+            administración de inmediato.
+          </>
+        ),
+        nota: 'Podés revertirlo cuando quieras desde este mismo menú.',
+        botonLabel: 'Quitar admin',
+        botonCargando: 'Guardando…',
+      }
+    case 'reset':
+      return {
+        variant: 'info',
+        icono: KeyRound,
+        titulo: '¿Restablecer la contraseña?',
+        descripcion: (
+          <>
+            Se envía un enlace a <strong className="font-mono font-semibold text-foreground">{usuario.email}</strong> para crear una
+            contraseña nueva.
+          </>
+        ),
+        nota: 'Su contraseña actual deja de funcionar en cuanto la cambie desde el enlace.',
+        botonLabel: 'Enviar enlace',
+        botonCargando: 'Enviando…',
+      }
+    case 'eliminar':
+      return {
+        variant: 'destructive',
+        icono: Trash2,
+        titulo: '¿Eliminar este usuario?',
+        descripcion: (
+          <>
+            Vas a eliminar a <strong className="font-mono font-semibold text-foreground">{usuario.email}</strong>. Pierde acceso a la
+            app de inmediato.
+          </>
+        ),
+        nota: 'Esta acción no se puede deshacer. Se borra también su historial de simulacros, dispositivos y configuración guardada.',
+        botonLabel: 'Eliminar usuario',
+        botonCargando: 'Eliminando…',
+      }
+  }
+}
+
 export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) {
   const [busqueda, setBusqueda] = useState('')
   const [rol, setRol] = useState<FiltroRol>('todos')
@@ -29,13 +137,92 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
   const [procesandoId, setProcesandoId] = useState<string | null>(null)
   const [errorAccion, setErrorAccion] = useState<string | null>(null)
 
-  async function manejarCambioRol(userId: string, accion: 'otorgar' | 'quitar') {
-    setProcesandoId(userId)
+  const [menuAbiertoId, setMenuAbiertoId] = useState<string | null>(null)
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null)
+  const [confirmacion, setConfirmacion] = useState<Confirmacion | null>(null)
+  const [confirmando, setConfirmando] = useState(false)
+  const [usuarioEstadisticas, setUsuarioEstadisticas] = useState<Usuario | null>(null)
+
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  function abrirMenu(u: Usuario, boton: HTMLButtonElement) {
+    if (menuAbiertoId === u.id) {
+      setMenuAbiertoId(null)
+      return
+    }
+    const r = boton.getBoundingClientRect()
+    const anchoMenu = 240
+    let left = r.right - anchoMenu
+    if (left < 8) left = 8
+    setMenuPos({ top: r.bottom + 6, left })
+    setMenuAbiertoId(u.id)
+  }
+
+  useEffect(() => {
+    if (!menuAbiertoId) return
+    function cerrar(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuAbiertoId(null)
+    }
+    function tecla(e: KeyboardEvent) {
+      if (e.key === 'Escape') setMenuAbiertoId(null)
+    }
+    function cerrarPorScrollOResize() {
+      setMenuAbiertoId(null)
+    }
+    document.addEventListener('mousedown', cerrar)
+    document.addEventListener('keydown', tecla)
+    window.addEventListener('scroll', cerrarPorScrollOResize, true)
+    window.addEventListener('resize', cerrarPorScrollOResize)
+    return () => {
+      document.removeEventListener('mousedown', cerrar)
+      document.removeEventListener('keydown', tecla)
+      window.removeEventListener('scroll', cerrarPorScrollOResize, true)
+      window.removeEventListener('resize', cerrarPorScrollOResize)
+    }
+  }, [menuAbiertoId])
+
+  useEffect(() => {
+    if (!confirmacion) return
+    function tecla(e: KeyboardEvent) {
+      if (e.key === 'Escape' && !confirmando) setConfirmacion(null)
+    }
+    document.addEventListener('keydown', tecla)
+    return () => document.removeEventListener('keydown', tecla)
+  }, [confirmacion, confirmando])
+
+  function pedirConfirmacion(tipo: TipoConfirmacion, usuario: Usuario) {
+    setMenuAbiertoId(null)
     setErrorAccion(null)
-    const resultado = accion === 'otorgar' ? await otorgarAdmin(userId) : await revocarAdmin(userId)
+    setConfirmacion({ tipo, usuario })
+  }
+
+  async function confirmar() {
+    if (!confirmacion) return
+    const { tipo, usuario } = confirmacion
+    setConfirmando(true)
+    setProcesandoId(usuario.id)
+
+    let resultado: { ok: boolean }
+    if (tipo === 'otorgar') resultado = await otorgarAdmin(usuario.id)
+    else if (tipo === 'quitar') resultado = await revocarAdmin(usuario.id)
+    else if (tipo === 'reset') resultado = await restablecerContrasena(usuario.email)
+    else resultado = await eliminarUsuario(usuario.id)
+
+    setConfirmando(false)
     setProcesandoId(null)
-    if (resultado.ok) onRecargar()
-    else setErrorAccion('No se pudo actualizar el rol. Probá de nuevo en un momento.')
+    setConfirmacion(null)
+
+    if (resultado.ok) {
+      onRecargar()
+    } else {
+      const mensajes: Record<TipoConfirmacion, string> = {
+        otorgar: 'No se pudo actualizar el rol. Probá de nuevo en un momento.',
+        quitar: 'No se pudo actualizar el rol. Probá de nuevo en un momento.',
+        reset: 'No se pudo enviar el enlace de restablecimiento. Probá de nuevo en un momento.',
+        eliminar: 'No se pudo eliminar el usuario. Probá de nuevo en un momento.',
+      }
+      setErrorAccion(mensajes[tipo])
+    }
   }
 
   const stats = useMemo(() => {
@@ -59,6 +246,7 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
   }, [usuarios, busqueda, rol, actividad])
 
   const hayFiltros = busqueda.trim() !== '' || rol !== 'todos' || actividad !== 'todos'
+  const usuarioMenu = menuAbiertoId ? usuarios.find((u) => u.id === menuAbiertoId) ?? null : null
 
   return (
     <section>
@@ -122,7 +310,7 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
 
       <div className="overflow-hidden rounded-2xl border border-border bg-card">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] border-collapse">
+          <table className="w-full min-w-[780px] border-collapse">
             <thead>
               <tr className="border-b border-border text-left text-[0.7rem] font-bold uppercase tracking-wide text-muted-foreground">
                 <th className="whitespace-nowrap px-4 py-3">Usuario</th>
@@ -131,37 +319,50 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
                 <th className="whitespace-nowrap px-4 py-3">Simulacros</th>
                 <th className="whitespace-nowrap px-4 py-3">Promedio</th>
                 <th className="whitespace-nowrap px-4 py-3">Rol</th>
+                <th className="whitespace-nowrap px-4 py-3 text-right">
+                  <span className="sr-only">Acciones</span>
+                </th>
               </tr>
             </thead>
             <tbody>
               {cargando ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
                     <Loader2 className="mx-auto h-5 w-5 animate-spin" />
                   </td>
                 </tr>
               ) : filtrados.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                  <td colSpan={7} className="px-4 py-12 text-center text-sm text-muted-foreground">
                     {usuarios.length === 0 ? 'Todavía no hay usuarios registrados.' : 'Ningún usuario coincide con estos filtros.'}
                   </td>
                 </tr>
               ) : (
                 filtrados.map((u) => (
-                  <tr key={u.id} className="border-b border-border/70 text-sm last:border-b-0 hover:bg-muted/50">
+                  <tr
+                    key={u.id}
+                    className={`border-b border-border/70 text-sm last:border-b-0 hover:bg-muted/50 ${
+                      menuAbiertoId === u.id ? 'bg-muted/50' : ''
+                    }`}
+                  >
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setUsuarioEstadisticas(u)}
+                        title="Ver estadísticas individuales"
+                        className="flex items-center gap-2.5 rounded-md text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      >
                         <span className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full bg-accent/15 text-[0.68rem] font-extrabold text-accent">
                           {u.email.charAt(0).toUpperCase()}
                         </span>
-                        <span className="font-mono font-semibold text-foreground">{u.email}</span>
+                        <span className="font-mono font-semibold text-foreground hover:underline">{u.email}</span>
                         {emailPareceSospechoso(u.email) && (
                           <TriangleAlert
                             className="h-3.5 w-3.5 shrink-0 text-destructive"
                             aria-label="El dominio de este correo parece inusual — verificar si hubo un error de tipeo"
                           />
                         )}
-                      </div>
+                      </button>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 font-mono text-muted-foreground">{fmt(u.creadoEn)}</td>
                     <td className="whitespace-nowrap px-4 py-3 font-mono text-muted-foreground">{fmt(u.ultimoAcceso)}</td>
@@ -170,12 +371,23 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
                       {u.promedio === null ? '—' : `${u.promedio}%`}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">
-                      <RolCelda
-                        usuario={u}
-                        esUnoMismo={u.id === miPropioId}
-                        procesando={procesandoId === u.id}
-                        onCambiar={(accion) => manejarCambioRol(u.id, accion)}
-                      />
+                      <RolBadge esAdmin={u.esAdmin} />
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right">
+                      {procesandoId === u.id ? (
+                        <Loader2 className="ml-auto h-4 w-4 animate-spin text-muted-foreground" />
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={(e) => abrirMenu(u, e.currentTarget)}
+                          aria-haspopup="true"
+                          aria-expanded={menuAbiertoId === u.id}
+                          aria-label={`Acciones para ${u.email}`}
+                          className="rounded-lg p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        >
+                          <EllipsisVertical className="h-4 w-4" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -193,6 +405,46 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
         <code className="mx-1 rounded bg-muted px-1 py-0.5">admins</code> para el rol. Los planes pagos llegan con la integración de
         Stripe.
       </p>
+
+      {usuarioMenu && menuPos && (
+        <div
+          ref={menuRef}
+          style={{ top: menuPos.top, left: menuPos.left }}
+          className="fixed z-40 w-60 animate-float-up rounded-2xl border border-border bg-popover p-1.5 shadow-xl"
+        >
+          <MenuItem
+            icono={KeyRound}
+            etiqueta="Restablecer contraseña"
+            onClick={() => pedirConfirmacion('reset', usuarioMenu)}
+          />
+          {usuarioMenu.esAdmin ? (
+            <MenuItem
+              icono={Shield}
+              etiqueta="Quitar admin"
+              disabled={usuarioMenu.id === miPropioId}
+              titulo={usuarioMenu.id === miPropioId ? 'No podés quitarte el rol de admin a vos mismo' : undefined}
+              onClick={() => pedirConfirmacion('quitar', usuarioMenu)}
+            />
+          ) : (
+            <MenuItem icono={Shield} etiqueta="Hacer admin" onClick={() => pedirConfirmacion('otorgar', usuarioMenu)} />
+          )}
+          <div className="my-1 h-px bg-border" />
+          <MenuItem
+            icono={Trash2}
+            etiqueta="Eliminar usuario"
+            danger
+            disabled={usuarioMenu.id === miPropioId}
+            titulo={usuarioMenu.id === miPropioId ? 'No podés eliminar tu propia cuenta' : undefined}
+            onClick={() => pedirConfirmacion('eliminar', usuarioMenu)}
+          />
+        </div>
+      )}
+
+      {confirmacion && <ModalConfirmacion confirmacion={confirmacion} cargando={confirmando} onCancelar={() => setConfirmacion(null)} onConfirmar={confirmar} />}
+
+      {usuarioEstadisticas && (
+        <PanelEstadisticasUsuario usuario={usuarioEstadisticas} onClose={() => setUsuarioEstadisticas(null)} />
+      )}
     </section>
   )
 }
@@ -206,47 +458,106 @@ function StatCard({ etiqueta, valor, cargando }: { etiqueta: string; valor: numb
   )
 }
 
-// El pill de "Rol" es a la vez el estado y el control: un click lo cambia
-// directo (insert/delete real en `admins`, sin paso intermedio). Vos mismo
-// no podés quitarte el rol a vos mismo (botón deshabilitado) para no
-// quedarte afuera del panel por accidente.
-function RolCelda({
-  usuario,
-  esUnoMismo,
-  procesando,
-  onCambiar,
+function RolBadge({ esAdmin }: { esAdmin: boolean }) {
+  return esAdmin ? (
+    <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary">Admin</span>
+  ) : (
+    <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold text-muted-foreground">Usuario</span>
+  )
+}
+
+function MenuItem({
+  icono: Icono,
+  etiqueta,
+  onClick,
+  danger,
+  disabled,
+  titulo,
 }: {
-  usuario: Usuario
-  esUnoMismo: boolean
-  procesando: boolean
-  onCambiar: (accion: 'otorgar' | 'quitar') => void
+  icono: typeof Shield
+  etiqueta: string
+  onClick: () => void
+  danger?: boolean
+  disabled?: boolean
+  titulo?: string
 }) {
-  if (procesando) {
-    return <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-  }
-
-  if (usuario.esAdmin) {
-    return (
-      <button
-        type="button"
-        onClick={() => onCambiar('quitar')}
-        disabled={esUnoMismo}
-        title={esUnoMismo ? 'No podés quitarte el rol de admin a vos mismo' : 'Click para quitar el rol de admin'}
-        className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary transition hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:bg-primary/10 disabled:hover:text-primary"
-      >
-        Admin
-      </button>
-    )
-  }
-
   return (
     <button
       type="button"
-      onClick={() => onCambiar('otorgar')}
-      title="Click para hacer admin"
-      className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold text-muted-foreground transition hover:bg-primary/10 hover:text-primary"
+      role="menuitem"
+      onClick={onClick}
+      disabled={disabled}
+      title={titulo}
+      className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${
+        danger ? 'text-destructive hover:bg-destructive/10' : 'text-foreground hover:bg-muted'
+      }`}
     >
-      Usuario
+      <Icono className="h-4 w-4 shrink-0" />
+      {etiqueta}
     </button>
+  )
+}
+
+function ModalConfirmacion({
+  confirmacion,
+  cargando,
+  onCancelar,
+  onConfirmar,
+}: {
+  confirmacion: Confirmacion
+  cargando: boolean
+  onCancelar: () => void
+  onConfirmar: () => void
+}) {
+  const cfg = configPara(confirmacion)
+  const Icono = cfg.icono
+  const colorIcono =
+    cfg.variant === 'destructive' ? 'bg-destructive/10 text-destructive' : cfg.variant === 'accent' ? 'bg-accent/15 text-accent' : 'bg-info/10 text-info'
+  const colorNota =
+    cfg.variant === 'destructive'
+      ? 'bg-destructive/10 text-destructive'
+      : cfg.variant === 'accent'
+        ? 'bg-accent/10 text-accent'
+        : 'bg-info/10 text-info'
+  const NotaIcono = cfg.variant === 'destructive' ? TriangleAlert : Info
+  const botonVariant = cfg.variant
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-5 backdrop-blur-sm"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget && !cargando) onCancelar()
+      }}
+    >
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirmacion-titulo"
+        className="flex w-full max-w-sm animate-float-up flex-col gap-4 rounded-2xl border border-border bg-card p-6 shadow-xl"
+      >
+        <div className={`flex h-11 w-11 items-center justify-center rounded-full ${colorIcono}`}>
+          <Icono className="h-5 w-5" />
+        </div>
+        <div>
+          <h2 id="confirmacion-titulo" className="text-base font-extrabold text-foreground">
+            {cfg.titulo}
+          </h2>
+          <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{cfg.descripcion}</p>
+        </div>
+        <div className={`flex items-start gap-2 rounded-xl px-3 py-2.5 text-xs leading-relaxed ${colorNota}`}>
+          <NotaIcono className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>{cfg.nota}</span>
+        </div>
+        <div className="mt-1 flex justify-end gap-2.5">
+          <Button type="button" variant="outline" onClick={onCancelar} disabled={cargando}>
+            Cancelar
+          </Button>
+          <Button type="button" variant={botonVariant} onClick={onConfirmar} disabled={cargando}>
+            {cargando && <Loader2 className="h-4 w-4 animate-spin" />}
+            {cargando ? cfg.botonCargando : cfg.botonLabel}
+          </Button>
+        </div>
+      </div>
+    </div>
   )
 }
