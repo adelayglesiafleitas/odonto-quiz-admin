@@ -149,7 +149,7 @@ export function PanelEstadisticasUsuario({ usuario, onClose }: Props) {
                       className="grid grid-cols-[88px_1fr_44px_52px] items-center gap-2.5 border-t border-border/60 py-2 text-xs first:border-t-0"
                     >
                       <span className="font-mono text-[11px] text-muted-foreground">{fechaHora(it.fecha)}</span>
-                      <span className="truncate text-muted-foreground">{it.capitulo === 'todos' ? 'Examen completo' : it.capitulo}</span>
+                      <span className="truncate text-muted-foreground">{it.capitulos.length === 0 ? 'Examen completo' : it.capitulos.join(', ')}</span>
                       <span className="text-right font-mono font-bold text-foreground">{it.porcentaje}%</span>
                       <span className="text-right font-mono text-[11px] text-muted-foreground">{fmtTiempo(it.tiempoUsadoSeg)}</span>
                     </div>

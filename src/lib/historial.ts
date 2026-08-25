@@ -6,7 +6,7 @@ export interface Intento {
   correctas: number
   porcentaje: number
   aprobado: boolean
-  capitulo: string
+  capitulos: string[]
   tiempoUsadoSeg: number
   agotoTiempo: boolean
   desgloseCapitulos: Record<string, { total: number; correctas: number }> | null
@@ -18,7 +18,7 @@ interface FilaHistorial {
   correctas: number
   porcentaje: number | string
   aprobado: boolean
-  capitulo: string
+  capitulos: string[]
   tiempo_usado_seg: number
   agoto_tiempo: boolean
   desglose_capitulos: Record<string, { total: number; correctas: number }> | null
@@ -34,7 +34,7 @@ interface FilaHistorial {
 export async function obtenerHistorialUsuario(userId: string): Promise<Intento[]> {
   const { data, error } = await supabase
     .from('historial_intentos')
-    .select('fecha, total_preguntas, correctas, porcentaje, aprobado, capitulo, tiempo_usado_seg, agoto_tiempo, desglose_capitulos')
+    .select('fecha, total_preguntas, correctas, porcentaje, aprobado, capitulos, tiempo_usado_seg, agoto_tiempo, desglose_capitulos')
     .eq('user_id', userId)
     .order('fecha', { ascending: true })
 
@@ -49,7 +49,7 @@ export async function obtenerHistorialUsuario(userId: string): Promise<Intento[]
     correctas: fila.correctas,
     porcentaje: Number(fila.porcentaje) || 0,
     aprobado: fila.aprobado,
-    capitulo: fila.capitulo,
+    capitulos: fila.capitulos,
     tiempoUsadoSeg: fila.tiempo_usado_seg,
     agotoTiempo: fila.agoto_tiempo,
     desgloseCapitulos: fila.desglose_capitulos,
