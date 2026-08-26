@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Search, Inbox, Loader2, Send, X, MessageCircleQuestion } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Search, Inbox, Loader2, Send, Trash2, X, MessageCircleQuestion } from 'lucide-react'
 import {
   obtenerMensajes,
   enviarMensaje,
   marcarLeidoAdmin,
   actualizarEstadoTicket,
+  eliminarTicket,
   suscribirseAMensajesTicket,
   contarNoLeidos,
   formatoRelativo,
@@ -36,6 +37,14 @@ const ESTILO_ESTADO: Record<EstadoTicket, string> = {
   cerrado: 'bg-muted text-muted-foreground',
 }
 
+// Para "Orden: por estado" — agrupa abierto < en_progreso < resuelto < cerrado.
+const ORDEN_ESTADO: Record<EstadoTicket, number> = {
+  abierto: 0,
+  en_progreso: 1,
+  resuelto: 2,
+  cerrado: 3,
+}
+
 const ETIQUETA_ORIGEN: Record<OrigenTicket, string> = {
   pregunta: 'Pregunta',
   cuenta: 'Cuenta',
@@ -55,7 +64,9 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
   const [busqueda, setBusqueda] = useState('')
   const [filtroEstado, setFiltroEstado] = useState<'todos' | EstadoTicket>('todos')
   const [filtroOrigen, setFiltroOrigen] = useState<'todos' | OrigenTicket>('todos')
+  const [orden, setOrden] = useState<'reciente' | 'antiguo' | 'estado'>('reciente')
   const [ticketAbiertoId, setTicketAbiertoId] = useState<string | null>(null)
+  const [confirmandoId, setConfirmandoId] = useState<string | null>(null)
 
   const stats = useMemo(
     () => ({
@@ -69,11 +80,20 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
 
   const filtrados = useMemo(() => {
     const q = busqueda.trim().toLowerCase()
-    return tickets
+    const base = tickets
       .filter((t) => !q || (correosPorId.get(t.usuarioId) ?? '').toLowerCase().includes(q) || t.asunto.toLowerCase().includes(q))
       .filter((t) => filtroEstado === 'todos' || t.estado === filtroEstado)
       .filter((t) => filtroOrigen === 'todos' || t.origen === filtroOrigen)
-  }, [tickets, busqueda, filtroEstado, filtroOrigen, correosPorId])
+    // 'reciente' no ordena de nuevo: `tickets` ya viene de
+    // listarTodosTickets() ordenado por ultima_actividad_en desc.
+    if (orden === 'antiguo') {
+      return [...base].sort((a, b) => new Date(a.ultimaActividadEn).getTime() - new Date(b.ultimaActividadEn).getTime())
+    }
+    if (orden === 'estado') {
+      return [...base].sort((a, b) => ORDEN_ESTADO[a.estado] - ORDEN_ESTADO[b.estado])
+    }
+    return base
+  }, [tickets, busqueda, filtroEstado, filtroOrigen, orden, correosPorId])
 
   const hayFiltros = busqueda.trim() !== '' || filtroEstado !== 'todos' || filtroOrigen !== 'todos'
 
@@ -81,6 +101,12 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
   // una copia propia), para que un cambio de estado o de actividad por
   // Realtime se refleje sin tener que cerrar y volver a abrir el modal.
   const ticketAbierto = ticketAbiertoId ? tickets.find((t) => t.id === ticketAbiertoId) ?? null : null
+
+  async function eliminar(id: string) {
+    const { ok } = await eliminarTicket(id)
+    setConfirmandoId(null)
+    if (ok) onRecargar()
+  }
 
   return (
     <section>
@@ -120,6 +146,11 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
           <option value="cuenta">Cuenta</option>
           <option value="pagos">Pagos</option>
           <option value="otro">Otro</option>
+        </select>
+        <select value={orden} onChange={(e) => setOrden(e.target.value as typeof orden)} className={inputBase}>
+          <option value="reciente">Orden: recientes primero</option>
+          <option value="antiguo">Orden: antiguos primero</option>
+          <option value="estado">Orden: por estado</option>
         </select>
         {hayFiltros && (
           <button
@@ -175,45 +206,87 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
                   </td>
                 </tr>
               ) : (
-                filtrados.map((t) => (
-                  <tr
-                    key={t.id}
-                    onClick={() => setTicketAbiertoId(t.id)}
-                    className={`cursor-pointer border-b border-border/70 text-sm last:border-b-0 hover:bg-muted/50 ${
-                      t.noLeidoAdmin ? 'bg-accent/[0.04]' : ''
-                    }`}
-                  >
-                    <td className="whitespace-nowrap px-4 py-3 font-mono text-muted-foreground">
-                      {correosPorId.get(t.usuarioId) ?? 'usuario desconocido'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1.5">
-                        {t.noLeidoAdmin && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true" />}
-                        <span className="font-bold text-foreground">{t.asunto}</span>
-                      </div>
-                      {t.origen === 'pregunta' && t.preguntaNumero != null && (
-                        <span className="mt-1 inline-block rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent">
-                          Pregunta N.º {t.preguntaNumero}
+                filtrados.map((t) =>
+                  confirmandoId === t.id ? (
+                    <tr key={t.id} className="border-b border-border/70 text-sm last:border-b-0">
+                      <td colSpan={6} className="px-4 py-3">
+                        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border-l-4 border-destructive bg-destructive/10 px-3 py-2.5">
+                          <p className="text-sm text-foreground">
+                            ¿Eliminar <span className="font-extrabold text-destructive">&quot;{t.asunto}&quot;</span>? La conversación
+                            completa se borra y no se puede deshacer.
+                          </p>
+                          <div className="flex shrink-0 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setConfirmandoId(null)}
+                              className="rounded-lg bg-muted px-3 py-1.5 text-xs font-bold text-foreground hover:bg-muted/70"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => eliminar(t.id)}
+                              className="rounded-lg bg-destructive px-3 py-1.5 text-xs font-bold text-destructive-foreground hover:bg-destructive/90"
+                            >
+                              Eliminar
+                            </button>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    <tr
+                      key={t.id}
+                      onClick={() => setTicketAbiertoId(t.id)}
+                      className={`group cursor-pointer border-b border-border/70 text-sm last:border-b-0 hover:bg-muted/50 ${
+                        t.noLeidoAdmin ? 'bg-accent/[0.04]' : ''
+                      }`}
+                    >
+                      <td className="whitespace-nowrap px-4 py-3 font-mono text-muted-foreground">
+                        {correosPorId.get(t.usuarioId) ?? 'usuario desconocido'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1.5">
+                          {t.noLeidoAdmin && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true" />}
+                          <span className="font-bold text-foreground">{t.asunto}</span>
+                        </div>
+                        {t.origen === 'pregunta' && t.preguntaNumero != null && (
+                          <span className="mt-1 inline-block rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent">
+                            Pregunta N.º {t.preguntaNumero}
+                          </span>
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3">
+                        <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold text-muted-foreground">
+                          {ETIQUETA_ORIGEN[t.origen]}
                         </span>
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3">
-                      <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold text-muted-foreground">
-                        {ETIQUETA_ORIGEN[t.origen]}
-                      </span>
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3">
-                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-bold ${ESTILO_ESTADO[t.estado]}`}>
-                        <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
-                        {ETIQUETA_ESTADO[t.estado]}
-                      </span>
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 font-mono text-muted-foreground">{formatoRelativo(t.ultimaActividadEn)}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right">
-                      <MessageCircleQuestion className="ml-auto h-4 w-4 text-muted-foreground" />
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3">
+                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-bold ${ESTILO_ESTADO[t.estado]}`}>
+                          <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
+                          {ETIQUETA_ESTADO[t.estado]}
+                        </span>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 font-mono text-muted-foreground">{formatoRelativo(t.ultimaActividadEn)}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setConfirmandoId(t.id)
+                            }}
+                            aria-label="Borrar ticket"
+                            className="rounded-lg p-1.5 text-muted-foreground opacity-60 transition hover:bg-destructive/10 hover:text-destructive hover:opacity-100 group-hover:opacity-100"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                          <MessageCircleQuestion className="h-4 w-4 text-muted-foreground" />
+                        </div>
+                      </td>
+                    </tr>
+                  ),
+                )
               )}
             </tbody>
           </table>
@@ -271,6 +344,9 @@ function ModalChat({
   const [cargandoMensajes, setCargandoMensajes] = useState(true)
   const [respuesta, setRespuesta] = useState('')
   const [enviando, setEnviando] = useState(false)
+  const [confirmarEliminar, setConfirmarEliminar] = useState(false)
+  const [eliminando, setEliminando] = useState(false)
+  const eliminarRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     let cancelado = false
@@ -312,6 +388,26 @@ function ModalChat({
   async function cambiarEstado(estado: EstadoTicket) {
     await actualizarEstadoTicket(ticket.id, estado)
     onRecargar()
+  }
+
+  useEffect(() => {
+    if (!confirmarEliminar) return
+    function alClickAfuera(e: MouseEvent) {
+      if (eliminarRef.current && !eliminarRef.current.contains(e.target as Node)) setConfirmarEliminar(false)
+    }
+    document.addEventListener('mousedown', alClickAfuera)
+    return () => document.removeEventListener('mousedown', alClickAfuera)
+  }, [confirmarEliminar])
+
+  async function eliminarConversacion() {
+    setEliminando(true)
+    const { ok } = await eliminarTicket(ticket.id)
+    if (ok) {
+      onRecargar()
+      onClose()
+    } else {
+      setEliminando(false)
+    }
   }
 
   return (
@@ -361,6 +457,40 @@ function ModalChat({
               <option value="resuelto">Marcar resuelto</option>
               <option value="cerrado">Marcar cerrado</option>
             </select>
+            <div ref={eliminarRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setConfirmarEliminar((v) => !v)}
+                aria-label="Borrar conversación"
+                aria-expanded={confirmarEliminar}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+              {confirmarEliminar && (
+                <div className="absolute right-0 top-full z-10 mt-2 w-60 rounded-xl border border-border bg-popover p-3 shadow-xl">
+                  <p className="text-xs text-foreground">¿Eliminar esta conversación? No se puede deshacer.</p>
+                  <div className="mt-2.5 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmarEliminar(false)}
+                      className="rounded-lg bg-muted px-3 py-1.5 text-xs font-bold text-foreground hover:bg-muted/70"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={eliminarConversacion}
+                      disabled={eliminando}
+                      className="inline-flex items-center gap-1 rounded-lg bg-destructive px-3 py-1.5 text-xs font-bold text-destructive-foreground hover:bg-destructive/90 disabled:opacity-60"
+                    >
+                      {eliminando && <Loader2 className="h-3 w-3 animate-spin" />}
+                      Eliminar
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
             <button
               type="button"
               onClick={onClose}

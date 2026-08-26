@@ -105,6 +105,19 @@ export async function actualizarEstadoTicket(ticketId: string, estado: EstadoTic
   return { ok: true }
 }
 
+// Borrado real (no hay "papelera"): RLS permite DELETE en `tickets` solo si
+// `es_admin()` (policy "Borrar tickets si es admin", migración
+// agregar_policy_borrar_tickets_admin). `mensajes.ticket_id` tiene
+// `on delete cascade`, así que los mensajes del ticket se borran solos.
+export async function eliminarTicket(ticketId: string): Promise<{ ok: boolean }> {
+  const { error } = await supabase.from('tickets').delete().eq('id', ticketId)
+  if (error) {
+    console.error('Error al eliminar el ticket:', error.message)
+    return { ok: false }
+  }
+  return { ok: true }
+}
+
 export function contarNoLeidos(tickets: Ticket[]): number {
   return tickets.filter((t) => t.noLeidoAdmin).length
 }
