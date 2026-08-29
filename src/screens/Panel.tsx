@@ -4,6 +4,7 @@ import { listarUsuarios, type Usuario } from '@/lib/usuarios'
 import { listarTodosTickets, contarNoLeidos, suscribirseATickets, type Ticket } from '@/lib/tickets'
 import { Usuarios } from './Usuarios'
 import { AtencionCliente } from './AtencionCliente'
+import { Mensajes } from './Mensajes'
 
 export function Panel({ correo, userId }: { correo: string; userId: string }) {
   const [vista, setVista] = useState<Vista>('usuarios')
@@ -44,7 +45,7 @@ export function Panel({ correo, userId }: { correo: string; userId: string }) {
       <main className="min-w-0 flex-1 px-5 py-6 md:px-9 md:py-9">
         {vista === 'usuarios' ? (
           <Usuarios usuarios={usuarios} cargando={cargandoUsuarios} miPropioId={userId} onRecargar={recargarUsuarios} />
-        ) : (
+        ) : vista === 'atencion' ? (
           <AtencionCliente
             tickets={tickets}
             cargando={cargandoTickets}
@@ -52,6 +53,8 @@ export function Panel({ correo, userId }: { correo: string; userId: string }) {
             adminId={userId}
             onRecargar={recargarTickets}
           />
+        ) : (
+          <Mensajes usuarios={usuarios} cargandoUsuarios={cargandoUsuarios} />
         )}
       </main>
     </div>

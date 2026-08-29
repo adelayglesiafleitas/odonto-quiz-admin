@@ -1,8 +1,8 @@
-import { ShieldCheck, Users, Inbox, LogOut } from 'lucide-react'
+import { ShieldCheck, Users, Inbox, Megaphone, LogOut } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { TemaToggle } from './TemaToggle'
 
-export type Vista = 'usuarios' | 'atencion'
+export type Vista = 'usuarios' | 'atencion' | 'mensajes'
 
 interface Props {
   vista: Vista
@@ -14,6 +14,7 @@ interface Props {
 const NAV: { target: Vista; label: string; icon: typeof Users }[] = [
   { target: 'usuarios', label: 'Usuarios', icon: Users },
   { target: 'atencion', label: 'Atención al cliente', icon: Inbox },
+  { target: 'mensajes', label: 'Mensajes', icon: Megaphone },
 ]
 
 export function AdminSidebar({ vista, onCambiarVista, correo, pendientes }: Props) {
