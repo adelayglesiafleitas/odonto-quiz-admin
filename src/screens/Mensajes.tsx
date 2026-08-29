@@ -19,6 +19,7 @@ import {
   AlertCircle,
   Pause,
   Play,
+  Repeat,
   Trash2,
   Info,
   TriangleAlert,
@@ -304,7 +305,15 @@ export function Mensajes({ usuarios, cargandoUsuarios }: { usuarios: Usuario[]; 
                           </span>
                         )}
                         <div className="min-w-0">
-                          <TipoBadge tipo={m.tipo} />
+                          <div className="flex items-center gap-2">
+                            <TipoBadge tipo={m.tipo} />
+                            {m.mostrarSiempre && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-accent" title="Se muestra en cada visita hasta que se elimine">
+                                <Repeat className="h-3 w-3" />
+                                Siempre
+                              </span>
+                            )}
+                          </div>
                           {m.texto && <p className="mt-0.5 line-clamp-2 text-foreground">{m.texto}</p>}
                         </div>
                       </div>
@@ -452,6 +461,7 @@ function ModalNuevoMensaje({
   const [texto, setTexto] = useState('')
   const [mediaFile, setMediaFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [mostrarSiempre, setMostrarSiempre] = useState(false)
   const [confirmandoTodos, setConfirmandoTodos] = useState(false)
   const [enviando, setEnviando] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -478,6 +488,7 @@ function ModalNuevoMensaje({
       texto: necesitaTexto ? texto.trim() : null,
       mediaFile: necesitaMedia ? mediaFile : null,
       destinatarioUserId: destinatario === 'todos' ? null : destinatarioUserId,
+      mostrarSiempre,
     })
     setEnviando(false)
     if (resultado.ok) {
@@ -535,6 +546,19 @@ function ModalNuevoMensaje({
               ))}
             </select>
           )}
+        </div>
+
+        <div>
+          <label className="text-xs font-bold uppercase tracking-wide text-muted-foreground">¿Cuántas veces se ve?</label>
+          <div className="mt-1.5 flex gap-1 rounded-xl border border-border bg-background p-1">
+            <button type="button" className={`${segmentBase} ${!mostrarSiempre ? segmentActivo : segmentInactivo}`} onClick={() => setMostrarSiempre(false)}>Una vez</button>
+            <button type="button" className={`${segmentBase} ${mostrarSiempre ? segmentActivo : segmentInactivo}`} onClick={() => setMostrarSiempre(true)}>Siempre hasta eliminarlo</button>
+          </div>
+          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+            {mostrarSiempre
+              ? 'Vuelve a aparecer en cada visita a Home aunque el usuario ya lo haya cerrado antes — solo para de mostrarse cuando lo elimines o desactives.'
+              : 'Una vez que el usuario lo cierra (o termina el video), no se le vuelve a mostrar nunca más.'}
+          </p>
         </div>
 
         {necesitaTexto && (

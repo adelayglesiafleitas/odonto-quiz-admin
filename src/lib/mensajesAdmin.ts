@@ -17,13 +17,14 @@ export interface MensajeAdmin {
   mediaUrl: string | null
   destinatarioUserId: string | null
   activo: boolean
+  mostrarSiempre: boolean
   creadoEn: string
 }
 
 export async function listarMensajes(): Promise<MensajeAdmin[]> {
   const { data, error } = await supabase
     .from('mensajes_admin')
-    .select('id, tipo, texto, media_url, destinatario_user_id, activo, creado_en')
+    .select('id, tipo, texto, media_url, destinatario_user_id, activo, mostrar_siempre, creado_en')
     .order('creado_en', { ascending: false })
 
   if (error) {
@@ -38,6 +39,7 @@ export async function listarMensajes(): Promise<MensajeAdmin[]> {
     mediaUrl: fila.media_url as string | null,
     destinatarioUserId: fila.destinatario_user_id as string | null,
     activo: fila.activo as boolean,
+    mostrarSiempre: fila.mostrar_siempre as boolean,
     creadoEn: fila.creado_en as string,
   }))
 }
@@ -67,6 +69,7 @@ interface NuevoMensaje {
   texto: string | null
   mediaFile: File | null
   destinatarioUserId: string | null
+  mostrarSiempre: boolean
 }
 
 export async function crearMensaje(input: NuevoMensaje): Promise<{ ok: boolean; error?: string }> {
@@ -87,6 +90,7 @@ export async function crearMensaje(input: NuevoMensaje): Promise<{ ok: boolean; 
     texto: input.texto,
     media_url: mediaUrl,
     destinatario_user_id: input.destinatarioUserId,
+    mostrar_siempre: input.mostrarSiempre,
     creado_por: user?.id ?? null,
   })
 
@@ -106,7 +110,23 @@ export async function cambiarActivoMensaje(id: string, activo: boolean): Promise
   return { ok: true }
 }
 
+// Antes de borrar la fila, intenta borrar también el archivo en Storage (si
+// tenía uno) para no dejar fotos/videos huérfanos en el bucket. Si el
+// borrado del archivo falla, igual sigue y borra la fila — un archivo
+// huérfano es preferible a un mensaje que el admin no puede eliminar.
 export async function eliminarMensaje(id: string): Promise<{ ok: boolean }> {
+  const { data: fila } = await supabase.from('mensajes_admin').select('media_url').eq('id', id).maybeSingle()
+
+  if (fila?.media_url) {
+    const marcador = '/mensajes-media/'
+    const indice = (fila.media_url as string).indexOf(marcador)
+    if (indice !== -1) {
+      const ruta = (fila.media_url as string).slice(indice + marcador.length)
+      const { error: errorStorage } = await supabase.storage.from('mensajes-media').remove([ruta])
+      if (errorStorage) console.error('Error al borrar el archivo del mensaje:', errorStorage.message)
+    }
+  }
+
   const { error } = await supabase.from('mensajes_admin').delete().eq('id', id)
   if (error) {
     console.error('Error al eliminar el mensaje:', error.message)
