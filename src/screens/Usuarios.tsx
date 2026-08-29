@@ -10,6 +10,8 @@ import {
   Shield,
   Trash2,
   Info,
+  Eye,
+  EyeOff,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { PanelEstadisticasUsuario } from '@/components/PanelEstadisticasUsuario'
@@ -19,6 +21,7 @@ import {
   revocarAdmin,
   restablecerContrasena,
   eliminarUsuario,
+  marcarTourBienvenida,
   type Usuario,
 } from '@/lib/usuarios'
 
@@ -46,7 +49,7 @@ interface Props {
 // confirmación — nada se aplica con un solo click. `variant` define el tono:
 // destructive para lo irreversible, accent para el cambio de rol (mismo
 // color que el pill de Admin), info para lo que es solo un aviso/envío.
-type TipoConfirmacion = 'otorgar' | 'quitar' | 'reset' | 'eliminar'
+type TipoConfirmacion = 'otorgar' | 'quitar' | 'reset' | 'eliminar' | 'marcarTourVisto' | 'marcarTourNoVisto'
 
 interface Confirmacion {
   tipo: TipoConfirmacion
@@ -94,6 +97,36 @@ function configPara(confirmacion: Confirmacion): ConfigConfirmacion {
         ),
         nota: 'Podés revertirlo cuando quieras desde este mismo menú.',
         botonLabel: 'Quitar admin',
+        botonCargando: 'Guardando…',
+      }
+    case 'marcarTourVisto':
+      return {
+        variant: 'accent',
+        icono: Eye,
+        titulo: '¿Marcar el tour de bienvenida como visto?',
+        descripcion: (
+          <>
+            La próxima vez que <strong className="font-mono font-semibold text-foreground">{usuario.email}</strong> entre a
+            Home, ya no va a ver el carrusel de bienvenida.
+          </>
+        ),
+        nota: 'No le manda ningún aviso. Podés volver a marcarlo como "No visto" cuando quieras desde este mismo menú.',
+        botonLabel: 'Marcar visto',
+        botonCargando: 'Guardando…',
+      }
+    case 'marcarTourNoVisto':
+      return {
+        variant: 'accent',
+        icono: EyeOff,
+        titulo: '¿Marcar el tour de bienvenida como no visto?',
+        descripcion: (
+          <>
+            La próxima vez que <strong className="font-mono font-semibold text-foreground">{usuario.email}</strong> entre a
+            Home, va a volver a ver el carrusel de bienvenida completo, como si fuera nuevo.
+          </>
+        ),
+        nota: 'Podés volver a marcarlo como "Visto" en cualquier momento desde este mismo menú.',
+        botonLabel: 'Marcar no visto',
         botonCargando: 'Guardando…',
       }
     case 'reset':
@@ -206,6 +239,8 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
     if (tipo === 'otorgar') resultado = await otorgarAdmin(usuario.id)
     else if (tipo === 'quitar') resultado = await revocarAdmin(usuario.id)
     else if (tipo === 'reset') resultado = await restablecerContrasena(usuario.email)
+    else if (tipo === 'marcarTourVisto') resultado = await marcarTourBienvenida(usuario.id, true)
+    else if (tipo === 'marcarTourNoVisto') resultado = await marcarTourBienvenida(usuario.id, false)
     else resultado = await eliminarUsuario(usuario.id)
 
     setConfirmando(false)
@@ -220,6 +255,8 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
         quitar: 'No se pudo actualizar el rol. Probá de nuevo en un momento.',
         reset: 'No se pudo enviar el enlace de restablecimiento. Probá de nuevo en un momento.',
         eliminar: 'No se pudo eliminar el usuario. Probá de nuevo en un momento.',
+        marcarTourVisto: 'No se pudo actualizar el tour de bienvenida. Probá de nuevo en un momento.',
+        marcarTourNoVisto: 'No se pudo actualizar el tour de bienvenida. Probá de nuevo en un momento.',
       }
       setErrorAccion(mensajes[tipo])
     }
@@ -318,6 +355,7 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
                 <th className="whitespace-nowrap px-4 py-3">Último acceso</th>
                 <th className="whitespace-nowrap px-4 py-3">Simulacros</th>
                 <th className="whitespace-nowrap px-4 py-3">Promedio</th>
+                <th className="whitespace-nowrap px-4 py-3">Tour</th>
                 <th className="whitespace-nowrap px-4 py-3">Rol</th>
                 <th className="whitespace-nowrap px-4 py-3 text-right">
                   <span className="sr-only">Acciones</span>
@@ -327,13 +365,13 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
             <tbody>
               {cargando ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
                     <Loader2 className="mx-auto h-5 w-5 animate-spin" />
                   </td>
                 </tr>
               ) : filtrados.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                  <td colSpan={8} className="px-4 py-12 text-center text-sm text-muted-foreground">
                     {usuarios.length === 0 ? 'Todavía no hay usuarios registrados.' : 'Ningún usuario coincide con estos filtros.'}
                   </td>
                 </tr>
@@ -371,6 +409,9 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
                       {u.promedio === null ? '—' : `${u.promedio}%`}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">
+                      <TourBadge visto={u.vioTourBienvenida} />
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3">
                       <RolBadge esAdmin={u.esAdmin} />
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-right">
@@ -401,9 +442,10 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
         <UsersIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         Fuente de estos datos: <code className="mx-1 rounded bg-muted px-1 py-0.5">auth.users</code> (alta, último acceso) vía la
         función <code className="mx-1 rounded bg-muted px-1 py-0.5">admin_listar_usuarios</code>,
-        <code className="mx-1 rounded bg-muted px-1 py-0.5">historial_intentos</code> agregado por usuario y{' '}
-        <code className="mx-1 rounded bg-muted px-1 py-0.5">admins</code> para el rol. Los planes pagos llegan con la integración de
-        Stripe.
+        <code className="mx-1 rounded bg-muted px-1 py-0.5">historial_intentos</code> agregado por usuario,{' '}
+        <code className="mx-1 rounded bg-muted px-1 py-0.5">admins</code> para el rol y{' '}
+        <code className="mx-1 rounded bg-muted px-1 py-0.5">perfiles</code> para el tour de bienvenida (sin fila creada = "No
+        visto"). Los planes pagos llegan con la integración de Stripe.
       </p>
 
       {usuarioMenu && menuPos && (
@@ -427,6 +469,19 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
             />
           ) : (
             <MenuItem icono={Shield} etiqueta="Hacer admin" onClick={() => pedirConfirmacion('otorgar', usuarioMenu)} />
+          )}
+          {usuarioMenu.vioTourBienvenida ? (
+            <MenuItem
+              icono={EyeOff}
+              etiqueta="Marcar tour como no visto"
+              onClick={() => pedirConfirmacion('marcarTourNoVisto', usuarioMenu)}
+            />
+          ) : (
+            <MenuItem
+              icono={Eye}
+              etiqueta="Marcar tour como visto"
+              onClick={() => pedirConfirmacion('marcarTourVisto', usuarioMenu)}
+            />
           )}
           <div className="my-1 h-px bg-border" />
           <MenuItem
@@ -463,6 +518,18 @@ function RolBadge({ esAdmin }: { esAdmin: boolean }) {
     <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary">Admin</span>
   ) : (
     <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold text-muted-foreground">Usuario</span>
+  )
+}
+
+// Mismo criterio visual que RolBadge (accent = lo que vale la pena notar,
+// muted = el estado esperado/mayoritario) pero al revés: acá lo que vale la
+// pena que un admin note de un vistazo es quién TODAVÍA NO vio el tour, no
+// quién sí.
+function TourBadge({ visto }: { visto: boolean }) {
+  return visto ? (
+    <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold text-muted-foreground">Visto</span>
+  ) : (
+    <span className="rounded-full bg-accent/15 px-2.5 py-0.5 text-xs font-bold text-accent">No visto</span>
   )
 }
 

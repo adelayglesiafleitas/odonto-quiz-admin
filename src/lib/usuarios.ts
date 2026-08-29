@@ -9,6 +9,7 @@ export interface Usuario {
   esAdmin: boolean
   simulacros: number
   promedio: number | null
+  vioTourBienvenida: boolean
 }
 
 interface FilaRpc {
@@ -25,12 +26,17 @@ interface FilaRpc {
 // `historial_intentos` (actividad), que sí son legibles directo por RLS
 // para un admin ("Ver historial propio o si es admin").
 export async function listarUsuarios(): Promise<Usuario[]> {
-  const [{ data: filas, error: errorUsuarios }, { data: admins, error: errorAdmins }, { data: intentos, error: errorIntentos }] =
-    await Promise.all([
-      supabase.rpc('admin_listar_usuarios'),
-      supabase.from('admins').select('user_id'),
-      supabase.from('historial_intentos').select('user_id, porcentaje'),
-    ])
+  const [
+    { data: filas, error: errorUsuarios },
+    { data: admins, error: errorAdmins },
+    { data: intentos, error: errorIntentos },
+    { data: perfiles, error: errorPerfiles },
+  ] = await Promise.all([
+    supabase.rpc('admin_listar_usuarios'),
+    supabase.from('admins').select('user_id'),
+    supabase.from('historial_intentos').select('user_id, porcentaje'),
+    supabase.from('perfiles').select('user_id, vio_tour_bienvenida'),
+  ])
 
   if (errorUsuarios) {
     console.error('Error al listar usuarios:', errorUsuarios.message)
@@ -38,8 +44,14 @@ export async function listarUsuarios(): Promise<Usuario[]> {
   }
   if (errorAdmins) console.error('Error al listar admins:', errorAdmins.message)
   if (errorIntentos) console.error('Error al leer intentos para el resumen de usuarios:', errorIntentos.message)
+  // No tener fila en `perfiles` es el caso esperado para casi todos hoy (la
+  // tabla es nueva, sin backfill) — no es un error, simplemente vale 'No visto'.
+  if (errorPerfiles) console.error('Error al leer perfiles para el tour de bienvenida:', errorPerfiles.message)
 
   const idsAdmin = new Set((admins ?? []).map((fila) => fila.user_id as string))
+  const tourVistoPorUsuario = new Map<string, boolean>(
+    (perfiles ?? []).map((fila) => [fila.user_id as string, Boolean(fila.vio_tour_bienvenida)]),
+  )
 
   const resumenPorUsuario = new Map<string, { simulacros: number; sumaPorcentaje: number }>()
   for (const fila of intentos ?? []) {
@@ -61,6 +73,7 @@ export async function listarUsuarios(): Promise<Usuario[]> {
       esAdmin: idsAdmin.has(fila.user_id),
       simulacros: resumen?.simulacros ?? 0,
       promedio: resumen && resumen.simulacros > 0 ? Math.round(resumen.sumaPorcentaje / resumen.simulacros) : null,
+      vioTourBienvenida: tourVistoPorUsuario.get(fila.user_id) ?? false,
     }
   })
 }
@@ -85,6 +98,24 @@ export async function revocarAdmin(userId: string): Promise<{ ok: boolean }> {
   const { error } = await supabase.from('admins').delete().eq('user_id', userId)
   if (error) {
     console.error('Error al quitar admin:', error.message)
+    return { ok: false }
+  }
+  return { ok: true }
+}
+
+// A diferencia de `otorgarAdmin`/`revocarAdmin` (que siempre escriben sobre
+// una fila que ya existe en `admins`), acá casi nunca hay fila previa en
+// `perfiles` — la tabla es nueva y sin backfill, así que la mayoría de los
+// usuarios todavía no tienen una. Por eso es upsert (mismo patrón que usa el
+// cliente en tourBienvenidaRemoto.ts): si no existe, la crea; si existe, la
+// actualiza. Requiere la policy "Los admins crean cualquier perfil" además de
+// la de update, si no, el insert de la primera vez lo rechaza RLS.
+export async function marcarTourBienvenida(userId: string, visto: boolean): Promise<{ ok: boolean }> {
+  const { error } = await supabase
+    .from('perfiles')
+    .upsert({ user_id: userId, vio_tour_bienvenida: visto }, { onConflict: 'user_id' })
+  if (error) {
+    console.error('Error al actualizar el tour de bienvenida:', error.message)
     return { ok: false }
   }
   return { ok: true }
