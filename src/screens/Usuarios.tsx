@@ -12,6 +12,8 @@ import {
   Info,
   Eye,
   EyeOff,
+  Lock,
+  Unlock,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { PanelEstadisticasUsuario } from '@/components/PanelEstadisticasUsuario'
@@ -22,6 +24,7 @@ import {
   restablecerContrasena,
   eliminarUsuario,
   marcarTourBienvenida,
+  marcarAcademiaHabilitada,
   type Usuario,
 } from '@/lib/usuarios'
 
@@ -49,7 +52,15 @@ interface Props {
 // confirmación — nada se aplica con un solo click. `variant` define el tono:
 // destructive para lo irreversible, accent para el cambio de rol (mismo
 // color que el pill de Admin), info para lo que es solo un aviso/envío.
-type TipoConfirmacion = 'otorgar' | 'quitar' | 'reset' | 'eliminar' | 'marcarTourVisto' | 'marcarTourNoVisto'
+type TipoConfirmacion =
+  | 'otorgar'
+  | 'quitar'
+  | 'reset'
+  | 'eliminar'
+  | 'marcarTourVisto'
+  | 'marcarTourNoVisto'
+  | 'habilitarAcademia'
+  | 'deshabilitarAcademia'
 
 interface Confirmacion {
   tipo: TipoConfirmacion
@@ -127,6 +138,36 @@ function configPara(confirmacion: Confirmacion): ConfigConfirmacion {
         ),
         nota: 'Podés volver a marcarlo como "Visto" en cualquier momento desde este mismo menú.',
         botonLabel: 'Marcar no visto',
+        botonCargando: 'Guardando…',
+      }
+    case 'habilitarAcademia':
+      return {
+        variant: 'accent',
+        icono: Unlock,
+        titulo: '¿Habilitar Academia para este usuario?',
+        descripcion: (
+          <>
+            <strong className="font-mono font-semibold text-foreground">{usuario.email}</strong> va a poder usar la Academia
+            normalmente la próxima vez que entre, en vez de ver el aviso de acceso.
+          </>
+        ),
+        nota: 'Podés quitarle el acceso cuando quieras desde este mismo menú.',
+        botonLabel: 'Habilitar',
+        botonCargando: 'Guardando…',
+      }
+    case 'deshabilitarAcademia':
+      return {
+        variant: 'accent',
+        icono: Lock,
+        titulo: '¿Quitar el acceso a Academia?',
+        descripcion: (
+          <>
+            <strong className="font-mono font-semibold text-foreground">{usuario.email}</strong> va a ver el aviso de que no
+            tiene acceso la próxima vez que entre a Academia — el botón sigue visible, pero sin contenido.
+          </>
+        ),
+        nota: 'Podés volver a habilitárselo cuando quieras desde este mismo menú.',
+        botonLabel: 'Quitar acceso',
         botonCargando: 'Guardando…',
       }
     case 'reset':
@@ -241,6 +282,8 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
     else if (tipo === 'reset') resultado = await restablecerContrasena(usuario.email)
     else if (tipo === 'marcarTourVisto') resultado = await marcarTourBienvenida(usuario.id, true)
     else if (tipo === 'marcarTourNoVisto') resultado = await marcarTourBienvenida(usuario.id, false)
+    else if (tipo === 'habilitarAcademia') resultado = await marcarAcademiaHabilitada(usuario.id, true)
+    else if (tipo === 'deshabilitarAcademia') resultado = await marcarAcademiaHabilitada(usuario.id, false)
     else resultado = await eliminarUsuario(usuario.id)
 
     setConfirmando(false)
@@ -257,6 +300,8 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
         eliminar: 'No se pudo eliminar el usuario. Probá de nuevo en un momento.',
         marcarTourVisto: 'No se pudo actualizar el tour de bienvenida. Probá de nuevo en un momento.',
         marcarTourNoVisto: 'No se pudo actualizar el tour de bienvenida. Probá de nuevo en un momento.',
+        habilitarAcademia: 'No se pudo actualizar el acceso a Academia. Probá de nuevo en un momento.',
+        deshabilitarAcademia: 'No se pudo actualizar el acceso a Academia. Probá de nuevo en un momento.',
       }
       setErrorAccion(mensajes[tipo])
     }
@@ -356,6 +401,7 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
                 <th className="whitespace-nowrap px-4 py-3">Simulacros</th>
                 <th className="whitespace-nowrap px-4 py-3">Promedio</th>
                 <th className="whitespace-nowrap px-4 py-3">Tour</th>
+                <th className="whitespace-nowrap px-4 py-3">Academia</th>
                 <th className="whitespace-nowrap px-4 py-3">Rol</th>
                 <th className="whitespace-nowrap px-4 py-3 text-right">
                   <span className="sr-only">Acciones</span>
@@ -365,13 +411,13 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
             <tbody>
               {cargando ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
                     <Loader2 className="mx-auto h-5 w-5 animate-spin" />
                   </td>
                 </tr>
               ) : filtrados.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                  <td colSpan={9} className="px-4 py-12 text-center text-sm text-muted-foreground">
                     {usuarios.length === 0 ? 'Todavía no hay usuarios registrados.' : 'Ningún usuario coincide con estos filtros.'}
                   </td>
                 </tr>
@@ -412,6 +458,9 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
                       <TourBadge visto={u.vioTourBienvenida} />
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">
+                      <AcademiaBadge habilitada={u.academiaHabilitada} />
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3">
                       <RolBadge esAdmin={u.esAdmin} />
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-right">
@@ -444,8 +493,8 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
         función <code className="mx-1 rounded bg-muted px-1 py-0.5">admin_listar_usuarios</code>,
         <code className="mx-1 rounded bg-muted px-1 py-0.5">historial_intentos</code> agregado por usuario,{' '}
         <code className="mx-1 rounded bg-muted px-1 py-0.5">admins</code> para el rol y{' '}
-        <code className="mx-1 rounded bg-muted px-1 py-0.5">perfiles</code> para el tour de bienvenida (sin fila creada = "No
-        visto"). Los planes pagos llegan con la integración de Stripe.
+        <code className="mx-1 rounded bg-muted px-1 py-0.5">perfiles</code> para el tour de bienvenida y el acceso a Academia
+        (sin fila creada = "No visto" / "No habilitada"). Los planes pagos llegan con la integración de Stripe.
       </p>
 
       {usuarioMenu && menuPos && (
@@ -481,6 +530,19 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
               icono={Eye}
               etiqueta="Marcar tour como visto"
               onClick={() => pedirConfirmacion('marcarTourVisto', usuarioMenu)}
+            />
+          )}
+          {usuarioMenu.academiaHabilitada ? (
+            <MenuItem
+              icono={Lock}
+              etiqueta="Quitar acceso a Academia"
+              onClick={() => pedirConfirmacion('deshabilitarAcademia', usuarioMenu)}
+            />
+          ) : (
+            <MenuItem
+              icono={Unlock}
+              etiqueta="Habilitar Academia"
+              onClick={() => pedirConfirmacion('habilitarAcademia', usuarioMenu)}
             />
           )}
           <div className="my-1 h-px bg-border" />
@@ -530,6 +592,17 @@ function TourBadge({ visto }: { visto: boolean }) {
     <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold text-muted-foreground">Visto</span>
   ) : (
     <span className="rounded-full bg-accent/15 px-2.5 py-0.5 text-xs font-bold text-accent">No visto</span>
+  )
+}
+
+// Acá al revés que TourBadge: el estado esperado/default es "No habilitada"
+// (nadie tiene acceso hasta que se lo dan a mano), así que ese es el muted;
+// "Habilitada" es lo que vale la pena que un admin note de un vistazo.
+function AcademiaBadge({ habilitada }: { habilitada: boolean }) {
+  return habilitada ? (
+    <span className="rounded-full bg-accent/15 px-2.5 py-0.5 text-xs font-bold text-accent">Habilitada</span>
+  ) : (
+    <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold text-muted-foreground">No habilitada</span>
   )
 }
 

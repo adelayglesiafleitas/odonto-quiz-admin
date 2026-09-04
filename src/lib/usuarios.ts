@@ -10,6 +10,7 @@ export interface Usuario {
   simulacros: number
   promedio: number | null
   vioTourBienvenida: boolean
+  academiaHabilitada: boolean
 }
 
 interface FilaRpc {
@@ -35,7 +36,7 @@ export async function listarUsuarios(): Promise<Usuario[]> {
     supabase.rpc('admin_listar_usuarios'),
     supabase.from('admins').select('user_id'),
     supabase.from('historial_intentos').select('user_id, porcentaje'),
-    supabase.from('perfiles').select('user_id, vio_tour_bienvenida'),
+    supabase.from('perfiles').select('user_id, vio_tour_bienvenida, academia_habilitada'),
   ])
 
   if (errorUsuarios) {
@@ -45,12 +46,16 @@ export async function listarUsuarios(): Promise<Usuario[]> {
   if (errorAdmins) console.error('Error al listar admins:', errorAdmins.message)
   if (errorIntentos) console.error('Error al leer intentos para el resumen de usuarios:', errorIntentos.message)
   // No tener fila en `perfiles` es el caso esperado para casi todos hoy (la
-  // tabla es nueva, sin backfill) — no es un error, simplemente vale 'No visto'.
-  if (errorPerfiles) console.error('Error al leer perfiles para el tour de bienvenida:', errorPerfiles.message)
+  // tabla es nueva, sin backfill) — no es un error, simplemente vale 'No
+  // visto' / 'No habilitada'.
+  if (errorPerfiles) console.error('Error al leer perfiles (tour de bienvenida / acceso a Academia):', errorPerfiles.message)
 
   const idsAdmin = new Set((admins ?? []).map((fila) => fila.user_id as string))
   const tourVistoPorUsuario = new Map<string, boolean>(
     (perfiles ?? []).map((fila) => [fila.user_id as string, Boolean(fila.vio_tour_bienvenida)]),
+  )
+  const academiaHabilitadaPorUsuario = new Map<string, boolean>(
+    (perfiles ?? []).map((fila) => [fila.user_id as string, Boolean(fila.academia_habilitada)]),
   )
 
   const resumenPorUsuario = new Map<string, { simulacros: number; sumaPorcentaje: number }>()
@@ -74,6 +79,7 @@ export async function listarUsuarios(): Promise<Usuario[]> {
       simulacros: resumen?.simulacros ?? 0,
       promedio: resumen && resumen.simulacros > 0 ? Math.round(resumen.sumaPorcentaje / resumen.simulacros) : null,
       vioTourBienvenida: tourVistoPorUsuario.get(fila.user_id) ?? false,
+      academiaHabilitada: academiaHabilitadaPorUsuario.get(fila.user_id) ?? false,
     }
   })
 }
@@ -116,6 +122,24 @@ export async function marcarTourBienvenida(userId: string, visto: boolean): Prom
     .upsert({ user_id: userId, vio_tour_bienvenida: visto }, { onConflict: 'user_id' })
   if (error) {
     console.error('Error al actualizar el tour de bienvenida:', error.message)
+    return { ok: false }
+  }
+  return { ok: true }
+}
+
+// Mismo patrón de upsert que marcarTourBienvenida, sobre la misma tabla
+// `perfiles`. La base también lo hace cumplir del otro lado: un trigger
+// (migración proteger_academia_habilitada_solo_admin) descarta cualquier
+// cambio a esta columna que no venga de una cuenta admin — así que aunque
+// esta llamada la haga cualquier código, solo tiene efecto real si quien
+// está autenticado es admin (que es siempre el caso acá, porque esta app
+// entera está detrás del gate de admin).
+export async function marcarAcademiaHabilitada(userId: string, habilitada: boolean): Promise<{ ok: boolean }> {
+  const { error } = await supabase
+    .from('perfiles')
+    .upsert({ user_id: userId, academia_habilitada: habilitada }, { onConflict: 'user_id' })
+  if (error) {
+    console.error('Error al actualizar el acceso a Academia:', error.message)
     return { ok: false }
   }
   return { ok: true }
