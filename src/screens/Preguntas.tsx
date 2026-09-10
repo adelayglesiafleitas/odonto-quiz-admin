@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Search, BookOpen, Loader2, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Search, BookOpen, Loader2, ChevronLeft, ChevronRight, Eye, EyeOff, Trash2, AlertTriangle } from 'lucide-react'
 import {
   listarPreguntas,
   listarAsignaturasConConteo,
   listarCapitulos,
   obtenerEstadisticas,
+  alternarOcultaPregunta,
+  eliminarPregunta,
   type Pregunta,
   type AsignaturaConConteo,
   type EstadisticasPreguntas,
@@ -49,6 +51,8 @@ export function Preguntas() {
   const [stats, setStats] = useState<EstadisticasPreguntas | null>(null)
 
   const [preguntaAbiertaId, setPreguntaAbiertaId] = useState<string | null>(null)
+  const [preguntaAEliminar, setPreguntaAEliminar] = useState<Pregunta | null>(null)
+  const [eliminando, setEliminando] = useState(false)
 
   useEffect(() => {
     listarAsignaturasConConteo().then((lista) => {
@@ -98,6 +102,25 @@ export function Preguntas() {
   function alGuardar() {
     cargar()
     obtenerEstadisticas().then(setStats)
+  }
+
+  // Sin confirmación a propósito: es reversible con el mismo botón (ver el
+  // comentario de alternarOcultaPregunta en lib/preguntas.ts).
+  async function alOcultar(p: Pregunta) {
+    const { ok } = await alternarOcultaPregunta(p.id, !p.oculta)
+    if (ok) cargar()
+  }
+
+  async function confirmarEliminar() {
+    if (!preguntaAEliminar) return
+    setEliminando(true)
+    const { ok } = await eliminarPregunta(preguntaAEliminar.id)
+    setEliminando(false)
+    setPreguntaAEliminar(null)
+    if (ok) {
+      cargar()
+      obtenerEstadisticas().then(setStats)
+    }
   }
 
   return (
@@ -167,18 +190,19 @@ export function Preguntas() {
                 <th className="whitespace-nowrap px-4 py-3">Capítulo</th>
                 <th className="whitespace-nowrap px-4 py-3">Opciones</th>
                 <th className="whitespace-nowrap px-4 py-3">Actualizada</th>
+                <th className="whitespace-nowrap px-4 py-3 text-right">Acciones</th>
               </tr>
             </thead>
             <tbody>
               {cargando ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">
                     <Loader2 className="mx-auto h-5 w-5 animate-spin" />
                   </td>
                 </tr>
               ) : preguntas.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                  <td colSpan={6} className="px-4 py-12 text-center text-sm text-muted-foreground">
                     <span className="flex flex-col items-center gap-2">
                       <BookOpen className="h-6 w-6 text-muted-foreground/60" />
                       Ninguna pregunta coincide con estos filtros.
@@ -190,7 +214,7 @@ export function Preguntas() {
                   <tr
                     key={p.id}
                     onClick={() => setPreguntaAbiertaId(p.id)}
-                    className="cursor-pointer border-b border-border/70 text-sm last:border-b-0 hover:bg-muted/50"
+                    className={`cursor-pointer border-b border-border/70 text-sm last:border-b-0 hover:bg-muted/50 ${p.oculta ? 'opacity-60' : ''}`}
                   >
                     <td className="whitespace-nowrap px-4 py-3 font-mono text-muted-foreground">{p.numero}</td>
                     <td className="max-w-[420px] px-4 py-3">
@@ -204,13 +228,54 @@ export function Preguntas() {
                             Caso clínico
                           </span>
                         )}
-                        <span className="line-clamp-1 font-semibold text-foreground">{p.pregunta}</span>
+                        <span
+                          className={`line-clamp-1 font-semibold ${p.oculta ? 'text-muted-foreground line-through' : 'text-foreground'}`}
+                        >
+                          {p.pregunta}
+                        </span>
+                        {p.oculta && (
+                          <span className="shrink-0 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                            Oculta
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">{p.capitulo ?? '—'}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">{p.opciones.length}</td>
                     <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-muted-foreground">
                       {p.actualizadoEn ? new Date(p.actualizadoEn).toLocaleDateString('es') : '—'}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            alOcultar(p)
+                          }}
+                          className={`flex h-7 w-7 items-center justify-center rounded-lg ${
+                            p.oculta
+                              ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                              : 'text-muted-foreground hover:bg-accent/10 hover:text-accent'
+                          }`}
+                          aria-label={p.oculta ? 'Mostrar pregunta' : 'Ocultar pregunta'}
+                          title={p.oculta ? 'Mostrar pregunta' : 'Ocultar pregunta'}
+                        >
+                          {p.oculta ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setPreguntaAEliminar(p)
+                          }}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                          aria-label="Eliminar pregunta"
+                          title="Eliminar pregunta"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -249,6 +314,50 @@ export function Preguntas() {
 
       {preguntaAbiertaId && (
         <EditarPreguntaModal preguntaId={preguntaAbiertaId} onClose={() => setPreguntaAbiertaId(null)} onGuardado={alGuardar} />
+      )}
+
+      {preguntaAEliminar && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => !eliminando && setPreguntaAEliminar(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
+              <AlertTriangle className="h-4.5 w-4.5" />
+            </div>
+            <h3 className="mb-2 text-sm font-extrabold text-foreground">¿Eliminar esta pregunta?</h3>
+            <p className="mb-5 text-xs leading-relaxed text-muted-foreground">
+              La pregunta N.º <b className="text-foreground">{preguntaAEliminar.numero}</b> de{' '}
+              <b className="text-foreground">
+                {asignaturas.find((a) => a.cursoId === preguntaAEliminar.cursoId)?.nombre ?? preguntaAEliminar.cursoId}
+              </b>{' '}
+              se va a borrar para siempre. No se puede deshacer. Si solo querés que deje de salir en los exámenes, cerrá esto y
+              usá el botón del ojo para ocultarla en cambio.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPreguntaAEliminar(null)}
+                disabled={eliminando}
+                className="h-8 rounded-lg border border-border px-3 text-xs font-bold text-foreground disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmarEliminar}
+                disabled={eliminando}
+                className="flex h-8 items-center gap-1.5 rounded-lg bg-destructive px-3 text-xs font-bold text-destructive-foreground disabled:opacity-60"
+              >
+                {eliminando && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Eliminar para siempre
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   )

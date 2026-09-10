@@ -27,6 +27,7 @@ export interface Pregunta {
   opciones: Opcion[]
   bibliografia: string | null
   caso: string | null
+  oculta: boolean
   actualizadoEn: string | null
   actualizadoPor: string | null
 }
@@ -44,6 +45,7 @@ function mapPregunta(fila: any): Pregunta {
     opciones: fila.opciones ?? [],
     bibliografia: fila.bibliografia,
     caso: fila.caso,
+    oculta: fila.oculta ?? false,
     actualizadoEn: fila.actualizado_en,
     actualizadoPor: fila.actualizado_por,
   }
@@ -211,6 +213,33 @@ export async function actualizarPregunta(id: string, cambios: CambiosPregunta): 
     .eq('id', id)
   if (error) {
     console.error('Error al guardar la pregunta:', error.message)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true }
+}
+
+// "Ocultar" (columna `oculta`, migración agregar_oculta_preguntas) es
+// reversible y sin confirmación: la pregunta deja de salir en los exámenes
+// (lib/data.ts del cliente filtra `oculta = false`) pero sigue en esta tabla,
+// atenuada, para poder volver a mostrarla con el mismo botón. Pensado para
+// sacar de circulación una pregunta problemática sin perder el trabajo de
+// haberla cargado — ver claude/preguntas-tabla-editor-admin.md.
+export async function alternarOcultaPregunta(id: string, oculta: boolean): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.from('preguntas').update({ oculta }).eq('id', id)
+  if (error) {
+    console.error('Error al ocultar/mostrar la pregunta:', error.message)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true }
+}
+
+// A diferencia de ocultar, esto borra la fila para siempre — por eso el
+// modal de confirmación vive en la pantalla, no acá. Protegido por la misma
+// RLS que `actualizarPregunta` (solo `es_admin()` puede).
+export async function eliminarPregunta(id: string): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.from('preguntas').delete().eq('id', id)
+  if (error) {
+    console.error('Error al eliminar la pregunta:', error.message)
     return { ok: false, error: error.message }
   }
   return { ok: true }
