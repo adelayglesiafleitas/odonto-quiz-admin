@@ -6,6 +6,7 @@ import { Usuarios } from './Usuarios'
 import { AtencionCliente } from './AtencionCliente'
 import { Mensajes } from './Mensajes'
 import { Estadisticas } from './Estadisticas'
+import { Preguntas } from './Preguntas'
 
 export function Panel({ correo, userId }: { correo: string; userId: string }) {
   const [vista, setVista] = useState<Vista>('usuarios')
@@ -54,6 +55,8 @@ export function Panel({ correo, userId }: { correo: string; userId: string }) {
             adminId={userId}
             onRecargar={recargarTickets}
           />
+        ) : vista === 'preguntas' ? (
+          <Preguntas />
         ) : vista === 'mensajes' ? (
           <Mensajes usuarios={usuarios} cargandoUsuarios={cargandoUsuarios} />
         ) : (

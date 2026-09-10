@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Search, Inbox, Loader2, Send, Trash2, X, MessageCircleQuestion } from 'lucide-react'
+import { Search, Inbox, Loader2, Send, Trash2, X, MessageCircleQuestion, Pencil } from 'lucide-react'
 import {
   obtenerMensajes,
   enviarMensaje,
@@ -14,6 +14,7 @@ import {
   type EstadoTicket,
   type OrigenTicket,
 } from '@/lib/tickets'
+import { EditarPreguntaModal } from '@/components/EditarPreguntaModal'
 
 interface Props {
   tickets: Ticket[]
@@ -346,6 +347,7 @@ function ModalChat({
   const [enviando, setEnviando] = useState(false)
   const [confirmarEliminar, setConfirmarEliminar] = useState(false)
   const [eliminando, setEliminando] = useState(false)
+  const [editandoPregunta, setEditandoPregunta] = useState(false)
   const eliminarRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -441,13 +443,23 @@ function ModalChat({
               {correo} · abierto {formatoRelativo(ticket.creadoEn)}
             </p>
             {ticket.origen === 'pregunta' && ticket.preguntaNumero != null && (
-              <p className="mt-2 max-w-[52ch] rounded-lg bg-accent/10 px-2.5 py-1.5 text-xs text-foreground/80">
-                <span className="font-bold text-accent">
-                  Pregunta N.º {ticket.preguntaNumero}
-                  {ticket.preguntaCapitulo ? ` · ${ticket.preguntaCapitulo}` : ''}
-                </span>
-                {ticket.preguntaTexto ? ` — ${ticket.preguntaTexto}` : ''}
-              </p>
+              <div className="mt-2 max-w-[52ch] rounded-lg bg-accent/10 px-2.5 py-1.5 text-xs text-foreground/80">
+                <p>
+                  <span className="font-bold text-accent">
+                    Pregunta N.º {ticket.preguntaNumero}
+                    {ticket.preguntaCapitulo ? ` · ${ticket.preguntaCapitulo}` : ''}
+                  </span>
+                  {ticket.preguntaTexto ? ` — ${ticket.preguntaTexto}` : ''}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setEditandoPregunta(true)}
+                  className="mt-1.5 inline-flex items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1 text-xs font-bold text-accent-foreground transition hover:bg-accent/90"
+                >
+                  <Pencil className="h-3 w-3" />
+                  Editar esta pregunta
+                </button>
+              </div>
             )}
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -559,6 +571,14 @@ function ModalChat({
           </div>
         </div>
       </div>
+
+      {editandoPregunta && ticket.preguntaAsignatura && ticket.preguntaNumero != null && (
+        <EditarPreguntaModal
+          asignatura={ticket.preguntaAsignatura}
+          numero={ticket.preguntaNumero}
+          onClose={() => setEditandoPregunta(false)}
+        />
+      )}
     </div>
   )
 }
