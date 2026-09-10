@@ -2,10 +2,11 @@ import { useCallback, useEffect, useState } from 'react'
 import { Search, BookOpen, Loader2, ChevronLeft, ChevronRight } from 'lucide-react'
 import {
   listarPreguntas,
-  listarAsignaturas,
+  listarAsignaturasConConteo,
   listarCapitulos,
   obtenerEstadisticas,
   type Pregunta,
+  type AsignaturaConConteo,
   type EstadisticasPreguntas,
 } from '@/lib/preguntas'
 import { EditarPreguntaModal } from '@/components/EditarPreguntaModal'
@@ -19,6 +20,14 @@ const inputBase =
 // app del cliente) por la tabla `preguntas` de Supabase, editable acá sin
 // tocar código. Ver claude/panel-revision-admin.md.
 //
+// El filtro principal es por asignatura REAL (`curso_id`: Pacientes
+// especiales, Psicología, Ortodoncia, Materiales Odontológicos — las mismas
+// 4 que ve el alumno en "¿Qué vas a examinar?"), no por el campo de texto
+// `asignatura` de cada pregunta: ese campo se repite entre cursos (p. ej.
+// "Examen Práctico" existe con preguntas distintas tanto en Pacientes
+// Especiales como en Psicología), así que filtrar por ahí mezclaba bancos.
+// Ver claude/preguntas-tabla-editor-admin.md.
+//
 // A diferencia de Usuarios/AtencionCliente (que cargan todo una vez en
 // Panel.tsx), acá cada página se pide al servidor con `.range()` — Ortodoncia
 // sola tiene más de 17 mil preguntas, traerlas todas al navegador de una vez
@@ -26,8 +35,8 @@ const inputBase =
 // mucho"). Este filtro/paginado es del panel admin, no afecta cómo el cliente
 // carga un examen.
 export function Preguntas() {
-  const [asignaturas, setAsignaturas] = useState<string[]>([])
-  const [asignatura, setAsignatura] = useState<string>('')
+  const [asignaturas, setAsignaturas] = useState<AsignaturaConConteo[]>([])
+  const [cursoId, setCursoId] = useState<string>('')
   const [capitulos, setCapitulos] = useState<string[]>([])
   const [capitulo, setCapitulo] = useState<string>('')
   const [busqueda, setBusqueda] = useState('')
@@ -42,26 +51,26 @@ export function Preguntas() {
   const [preguntaAbiertaId, setPreguntaAbiertaId] = useState<string | null>(null)
 
   useEffect(() => {
-    listarAsignaturas().then((lista) => {
+    listarAsignaturasConConteo().then((lista) => {
       setAsignaturas(lista)
-      if (lista.length > 0) setAsignatura((prev) => prev || lista[0])
+      if (lista.length > 0) setCursoId((prev) => prev || lista[0].cursoId)
     })
     obtenerEstadisticas().then(setStats)
   }, [])
 
   useEffect(() => {
-    if (!asignatura) {
+    if (!cursoId) {
       setCapitulos([])
       return
     }
-    listarCapitulos(asignatura).then(setCapitulos)
+    listarCapitulos(cursoId).then(setCapitulos)
     setCapitulo('')
-  }, [asignatura])
+  }, [cursoId])
 
   const cargar = useCallback(async () => {
     setCargando(true)
     const { preguntas: filas, total: totalFilas } = await listarPreguntas({
-      asignatura: asignatura || null,
+      cursoId: cursoId || null,
       capitulo: capitulo || null,
       busqueda,
       pagina,
@@ -70,7 +79,7 @@ export function Preguntas() {
     setPreguntas(filas)
     setTotal(totalFilas)
     setCargando(false)
-  }, [asignatura, capitulo, busqueda, pagina])
+  }, [cursoId, capitulo, busqueda, pagina])
 
   useEffect(() => {
     cargar()
@@ -80,7 +89,7 @@ export function Preguntas() {
   // quedar en una página vacía si el nuevo filtro tiene menos resultados.
   useEffect(() => {
     setPagina(0)
-  }, [asignatura, capitulo, busqueda])
+  }, [cursoId, capitulo, busqueda])
 
   const desde = total === 0 ? 0 : pagina * POR_PAGINA + 1
   const hasta = Math.min(total, (pagina + 1) * POR_PAGINA)
@@ -105,11 +114,11 @@ export function Preguntas() {
       </div>
 
       <div className="mb-1 flex flex-wrap items-center gap-2.5">
-        <select value={asignatura} onChange={(e) => setAsignatura(e.target.value)} className={inputBase}>
+        <select value={cursoId} onChange={(e) => setCursoId(e.target.value)} className={inputBase}>
           {asignaturas.length === 0 && <option value="">Sin asignaturas cargadas</option>}
           {asignaturas.map((a) => (
-            <option key={a} value={a}>
-              {a}
+            <option key={a.cursoId} value={a.cursoId}>
+              {a.nombre} ({a.total})
             </option>
           ))}
         </select>
@@ -185,7 +194,18 @@ export function Preguntas() {
                   >
                     <td className="whitespace-nowrap px-4 py-3 font-mono text-muted-foreground">{p.numero}</td>
                     <td className="max-w-[420px] px-4 py-3">
-                      <span className="line-clamp-1 font-semibold text-foreground">{p.pregunta}</span>
+                      <div className="flex items-center gap-1.5">
+                        {/* "Examen Práctico" es la etiqueta de caso clínico dentro de
+                            Pacientes Especiales y de Psicología — se marca acá solo
+                            como información, sin afectar el filtro principal (que
+                            ya separa por curso_id, no por este campo). */}
+                        {p.asignatura === 'Examen Práctico' && (
+                          <span className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent">
+                            Caso clínico
+                          </span>
+                        )}
+                        <span className="line-clamp-1 font-semibold text-foreground">{p.pregunta}</span>
+                      </div>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">{p.capitulo ?? '—'}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">{p.opciones.length}</td>

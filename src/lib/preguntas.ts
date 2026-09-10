@@ -18,6 +18,7 @@ export interface Opcion {
 
 export interface Pregunta {
   id: string
+  cursoId: string
   asignatura: string
   numero: number
   capitulo: string | null
@@ -34,6 +35,7 @@ export interface Pregunta {
 function mapPregunta(fila: any): Pregunta {
   return {
     id: fila.id,
+    cursoId: fila.curso_id,
     asignatura: fila.asignatura,
     numero: fila.numero,
     capitulo: fila.capitulo,
@@ -47,8 +49,27 @@ function mapPregunta(fila: any): Pregunta {
   }
 }
 
+// Las 4 asignaturas reales de la app (mismo cursoId que usan lib/cursos.ts y
+// lib/data.ts del lado del cliente, mismos nombres que ve el alumno en
+// "¿Qué vas a examinar?" — ver lib/asignaturas.ts allá). Se fija esta lista
+// acá en vez de calcularla con un SELECT distinct: `asignatura` (el texto de
+// cada pregunta) no alcanza para esto porque "Examen Práctico" existe tanto
+// en Pacientes Especiales como en Psicología con preguntas de casos
+// clínicos distintas — la columna que sí distingue el banco real es
+// `curso_id` (migración agregar_curso_id_preguntas). Además, calcular esta
+// lista pidiendo filas se rompía en la práctica: PostgREST no devuelve más
+// de 1000 filas por pedido, así que un SELECT sin acotar sobre 20 mil+ filas
+// podía perderse asignaturas enteras (el bug real que se vio: "2
+// Asignaturas" en vez de 4).
+export const ASIGNATURAS_ADMIN: { cursoId: string; nombre: string }[] = [
+  { cursoId: 'odontologia', nombre: 'Pacientes especiales' },
+  { cursoId: 'psicologia', nombre: 'Psicología' },
+  { cursoId: 'ortodoncia', nombre: 'Ortodoncia' },
+  { cursoId: 'materiales', nombre: 'Materiales Odontológicos' },
+]
+
 export interface FiltrosPreguntas {
-  asignatura: string | null
+  cursoId: string | null
   capitulo?: string | null
   busqueda?: string
   pagina: number
@@ -70,7 +91,7 @@ export async function listarPreguntas(filtros: FiltrosPreguntas): Promise<Result
 
   let query = supabase.from('preguntas').select('*', { count: 'exact' })
 
-  if (filtros.asignatura) query = query.eq('asignatura', filtros.asignatura)
+  if (filtros.cursoId) query = query.eq('curso_id', filtros.cursoId)
   if (filtros.capitulo) query = query.eq('capitulo', filtros.capitulo)
 
   const busqueda = filtros.busqueda?.trim()
@@ -91,26 +112,43 @@ export async function listarPreguntas(filtros: FiltrosPreguntas): Promise<Result
   return { preguntas: (data ?? []).map(mapPregunta), total: count ?? 0 }
 }
 
-export async function listarAsignaturas(): Promise<string[]> {
-  const { data, error } = await supabase.from('preguntas').select('asignatura').order('asignatura')
-  if (error) {
-    console.error('Error al listar asignaturas:', error.message)
-    return []
-  }
-  return Array.from(new Set((data ?? []).map((f) => f.asignatura as string)))
+export interface AsignaturaConConteo {
+  cursoId: string
+  nombre: string
+  total: number
 }
 
-export async function listarCapitulos(asignatura: string): Promise<string[]> {
-  const { data, error } = await supabase
-    .from('preguntas')
-    .select('capitulo')
-    .eq('asignatura', asignatura)
-    .not('capitulo', 'is', null)
+// Conteo exacto por asignatura vía `count: 'exact', head: true` (4 pedidos
+// en paralelo, uno por curso fijo de ASIGNATURAS_ADMIN) — nunca trae filas,
+// así que no importa que Ortodoncia tenga 17k+: el número siempre es exacto.
+export async function listarAsignaturasConConteo(): Promise<AsignaturaConConteo[]> {
+  const resultados = await Promise.all(
+    ASIGNATURAS_ADMIN.map(async ({ cursoId, nombre }) => {
+      const { count, error } = await supabase
+        .from('preguntas')
+        .select('*', { count: 'exact', head: true })
+        .eq('curso_id', cursoId)
+      if (error) console.error(`Error al contar preguntas de "${cursoId}":`, error.message)
+      return { cursoId, nombre, total: count ?? 0 }
+    }),
+  )
+  return resultados
+}
+
+// DISTINCT hecho en la base (RPC preguntas_capitulos_distintos, migración
+// rpc_preguntas_capitulos_distintos) en vez de pedir la columna `capitulo`
+// de todas las filas del curso y sacar los valores únicos acá — con
+// Ortodoncia (17k+ preguntas) esa segunda forma corre el mismo riesgo que ya
+// causó el bug de "2 Asignaturas": PostgREST no devuelve más de 1000 filas
+// por pedido, así que podría faltar un capítulo que solo aparece más allá de
+// la fila 1000.
+export async function listarCapitulos(cursoId: string): Promise<string[]> {
+  const { data, error } = await supabase.rpc('preguntas_capitulos_distintos', { p_curso_id: cursoId })
   if (error) {
     console.error('Error al listar capítulos:', error.message)
     return []
   }
-  return Array.from(new Set((data ?? []).map((f) => f.capitulo as string))).sort()
+  return ((data ?? []) as { capitulo: string | null }[]).map((f) => f.capitulo).filter((c): c is string => c != null)
 }
 
 export interface EstadisticasPreguntas {
@@ -121,13 +159,12 @@ export interface EstadisticasPreguntas {
 
 export async function obtenerEstadisticas(): Promise<EstadisticasPreguntas> {
   const hace7Dias = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
-  const [{ count: total }, { data: asignaturas }, { count: editadas }] = await Promise.all([
+  const [{ count: total }, { count: editadas }] = await Promise.all([
     supabase.from('preguntas').select('*', { count: 'exact', head: true }),
-    supabase.from('preguntas').select('asignatura'),
     supabase.from('preguntas').select('*', { count: 'exact', head: true }).gte('actualizado_en', hace7Dias),
   ])
-  const totalAsignaturas = new Set((asignaturas ?? []).map((f) => f.asignatura as string)).size
-  return { total: total ?? 0, totalAsignaturas, editadasUltimos7Dias: editadas ?? 0 }
+  // Fija, no calculada — ver el comentario de ASIGNATURAS_ADMIN más arriba.
+  return { total: total ?? 0, totalAsignaturas: ASIGNATURAS_ADMIN.length, editadasUltimos7Dias: editadas ?? 0 }
 }
 
 export async function obtenerPregunta(id: string): Promise<Pregunta | null> {
@@ -141,8 +178,11 @@ export async function obtenerPregunta(id: string): Promise<Pregunta | null> {
 
 // Para el botón "Editar esta pregunta" dentro de un ticket: el ticket solo
 // guarda asignatura + número (pregunta_asignatura / pregunta_numero en
-// `tickets`), no el id de `preguntas` — así que se busca por el índice único
-// (asignatura, numero) que crea la migración crear_tabla_preguntas.
+// `tickets`), no el id ni el curso_id de `preguntas` — así que se busca por
+// el índice único (asignatura, numero) que crea la migración
+// crear_tabla_preguntas. Esa pareja sigue siendo única fila por fila aunque
+// el texto "asignatura" se repita entre cursos, así que esta búsqueda es
+// correcta tal cual está.
 export async function buscarPreguntaPorAsignaturaYNumero(asignatura: string, numero: number): Promise<Pregunta | null> {
   const { data, error } = await supabase
     .from('preguntas')
@@ -178,7 +218,7 @@ export async function actualizarPregunta(id: string, cambios: CambiosPregunta): 
 
 // Señal liviana para avisarle a quien edita que algo puede estar mal, no una
 // validación real. Nació del caso real de claude/fix-texto-contaminado-copyright-materiales.md:
-// texto de copyright/marca de agua pegado en una opción, mucho más largo que
+// texto de copyright/marca de agua pegado en una opción, mucho más larga que
 // las demás. Falsos positivos son aceptables — es solo un aviso, no bloquea.
 export function detectarAnomalias(p: Pick<Pregunta, 'opciones'>): string[] {
   const avisos: string[] = []
