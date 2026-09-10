@@ -7,7 +7,7 @@ import { NoAutorizado } from '@/screens/NoAutorizado'
 import { Panel } from '@/screens/Panel'
 
 type EstadoAdmin = 'verificando' | 'admin' | 'no-admin'
-
+//cambio  kk
 function Cargando() {
   return (
     <div className="app-shell flex items-center justify-center bg-background">
