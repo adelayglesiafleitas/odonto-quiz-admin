@@ -328,14 +328,13 @@ export function Preguntas() {
             <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
               <AlertTriangle className="h-4.5 w-4.5" />
             </div>
-            <h3 className="mb-2 text-sm font-extrabold text-foreground">¿Eliminar esta pregunta?</h3>
+            <h3 className="mb-2 text-sm font-extrabold leading-snug text-foreground">
+              ¿Estás seguro de que querés eliminar la pregunta N.º {preguntaAEliminar.numero} de{' '}
+              {asignaturas.find((a) => a.cursoId === preguntaAEliminar.cursoId)?.nombre ?? preguntaAEliminar.cursoId}?
+            </h3>
             <p className="mb-5 text-xs leading-relaxed text-muted-foreground">
-              La pregunta N.º <b className="text-foreground">{preguntaAEliminar.numero}</b> de{' '}
-              <b className="text-foreground">
-                {asignaturas.find((a) => a.cursoId === preguntaAEliminar.cursoId)?.nombre ?? preguntaAEliminar.cursoId}
-              </b>{' '}
-              se va a borrar para siempre. No se puede deshacer. Si solo querés que deje de salir en los exámenes, cerrá esto y
-              usá el botón del ojo para ocultarla en cambio.
+              Esta acción no se puede deshacer. Si solo querés que deje de salir en los exámenes, cerrá esto y usá el botón del
+              ojo para ocultarla en cambio.
             </p>
             <div className="flex justify-end gap-2">
               <button
@@ -353,7 +352,7 @@ export function Preguntas() {
                 className="flex h-8 items-center gap-1.5 rounded-lg bg-destructive px-3 text-xs font-bold text-destructive-foreground disabled:opacity-60"
               >
                 {eliminando && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                Eliminar para siempre
+                Sí, eliminar
               </button>
             </div>
           </div>
