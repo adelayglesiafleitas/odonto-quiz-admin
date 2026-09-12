@@ -53,6 +53,11 @@ export function NotificacionesCampana({ tickets, correosPorId, onVerTodas }: Pro
     .sort((a, b) => new Date(b.ultimaActividadEn).getTime() - new Date(a.ultimaActividadEn).getTime())
   const primeros = sinLeer.slice(0, 5)
 
+  // "En progreso" se cuenta sobre TODOS los tickets (no solo los sin leer):
+  // el admin pidió que uno que ya leyó pero sigue trabajando no se pierda de
+  // vista solo porque dejó de ser "sin leer".
+  const enProgreso = tickets.filter((t) => t.estado === 'en_progreso').length
+
   function irATodas() {
     setAbierto(false)
     onVerTodas()
@@ -74,17 +79,32 @@ export function NotificacionesCampana({ tickets, correosPorId, onVerTodas }: Pro
             {sinLeer.length}
           </span>
         )}
+        {enProgreso > 0 && (
+          <span
+            title={`${enProgreso} en progreso`}
+            className="absolute -bottom-1 -right-1 min-w-[1.05rem] rounded-full bg-info px-1 py-0.5 text-center text-[0.62rem] font-extrabold text-info-foreground"
+          >
+            {enProgreso}
+          </span>
+        )}
       </button>
 
       {abierto && (
         <div className="card-elevated absolute right-0 z-20 mt-2 w-[21rem] overflow-hidden rounded-2xl border border-border bg-popover">
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <p className="text-sm font-extrabold text-popover-foreground">Notificaciones</p>
-            {sinLeer.length > 0 && (
-              <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[0.68rem] font-bold text-accent">
-                {sinLeer.length} sin leer
-              </span>
-            )}
+            <div className="flex items-center gap-1.5">
+              {sinLeer.length > 0 && (
+                <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[0.68rem] font-bold text-accent">
+                  {sinLeer.length} sin leer
+                </span>
+              )}
+              {enProgreso > 0 && (
+                <span className="rounded-full bg-info/15 px-2 py-0.5 text-[0.68rem] font-bold text-info">
+                  {enProgreso} en progreso
+                </span>
+              )}
+            </div>
           </div>
 
           {primeros.length === 0 ? (
