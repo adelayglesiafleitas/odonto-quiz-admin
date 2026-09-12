@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Loader2, Pencil, TriangleAlert, X } from 'lucide-react'
+import { Eye, EyeOff, Loader2, Pencil, TriangleAlert, X } from 'lucide-react'
 import {
   obtenerPregunta,
   buscarPreguntaPorAsignaturaYNumero,
   actualizarPregunta,
+  alternarOcultaPregunta,
   detectarAnomalias,
   type Pregunta,
   type Opcion,
@@ -34,6 +35,8 @@ export function EditarPreguntaModal({ preguntaId, asignatura, numero, onClose, o
   const [original, setOriginal] = useState<Pregunta | null>(null)
   const [enunciado, setEnunciado] = useState('')
   const [opciones, setOpciones] = useState<Opcion[]>([])
+  const [oculta, setOculta] = useState(false)
+  const [alternando, setAlternando] = useState(false)
   const [guardando, setGuardando] = useState(false)
   const [guardado, setGuardado] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -57,6 +60,7 @@ export function EditarPreguntaModal({ preguntaId, asignatura, numero, onClose, o
       setOriginal(pregunta)
       setEnunciado(pregunta.pregunta)
       setOpciones(pregunta.opciones)
+      setOculta(pregunta.oculta)
       setCargando(false)
     }
     cargar()
@@ -83,6 +87,23 @@ export function EditarPreguntaModal({ preguntaId, asignatura, numero, onClose, o
 
   function marcarCorrecta(letra: string) {
     setOpciones((prev) => prev.map((o) => ({ ...o, correcta: o.letra === letra })))
+  }
+
+  // Igual que el botón del ojo en Preguntas.tsx: reversible y sin
+  // confirmación, así que se aplica al toque. No cierra el modal — a
+  // diferencia de "Guardar cambios", es una acción separada que no depende
+  // del texto que se esté editando. `onGuardado` refresca la fila en la
+  // lista de atrás sin necesidad de cerrar este modal.
+  async function alternarOcultar() {
+    if (!original || alternando) return
+    setAlternando(true)
+    const nuevoValor = !oculta
+    const { ok } = await alternarOcultaPregunta(original.id, nuevoValor)
+    setAlternando(false)
+    if (ok) {
+      setOculta(nuevoValor)
+      onGuardado?.()
+    }
   }
 
   async function guardar() {
@@ -146,6 +167,40 @@ export function EditarPreguntaModal({ preguntaId, asignatura, numero, onClose, o
             </p>
           ) : (
             <div className="flex flex-col gap-4">
+              <div
+                className={`flex flex-wrap items-center justify-between gap-2.5 rounded-xl border px-3.5 py-2.5 ${
+                  oculta ? 'border-amber-500/30 bg-amber-500/[0.06]' : 'border-success/25 bg-success/[0.05]'
+                }`}
+              >
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold ${
+                    oculta ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' : 'bg-success/10 text-success'
+                  }`}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${oculta ? 'bg-amber-500' : 'bg-success'}`} />
+                  {oculta ? 'Oculta' : 'Activa'}
+                </span>
+                <button
+                  type="button"
+                  onClick={alternarOcultar}
+                  disabled={alternando}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition disabled:pointer-events-none disabled:opacity-50 ${
+                    oculta
+                      ? 'bg-accent/10 text-accent hover:bg-accent/20'
+                      : 'bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 dark:text-amber-400'
+                  }`}
+                >
+                  {alternando ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : oculta ? (
+                    <Eye className="h-3.5 w-3.5" />
+                  ) : (
+                    <EyeOff className="h-3.5 w-3.5" />
+                  )}
+                  {oculta ? 'Reactivar pregunta' : 'Ocultar pregunta'}
+                </button>
+              </div>
+
               <p className="rounded-lg bg-accent/10 px-3 py-2 text-xs text-foreground/80">
                 Escribí directo sobre el texto para corregirlo. Para cambiar cuál es la respuesta correcta, marcá el
                 punto junto a la opción — son dos cosas separadas, las dos siempre disponibles.
