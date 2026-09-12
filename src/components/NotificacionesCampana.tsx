@@ -1,12 +1,28 @@
 import { useEffect, useRef, useState } from 'react'
 import { Bell } from 'lucide-react'
-import { formatoRelativo, type Ticket, type OrigenTicket } from '@/lib/tickets'
+import { formatoRelativo, type Ticket, type OrigenTicket, type EstadoTicket } from '@/lib/tickets'
 
 const ETIQUETA_ORIGEN: Record<OrigenTicket, string> = {
   pregunta: 'Pregunta',
   cuenta: 'Cuenta',
   pagos: 'Pagos',
   otro: 'Otro',
+}
+
+// Mismas etiquetas y colores que la tabla de AtencionCliente.tsx (ETIQUETA_ESTADO/ESTILO_ESTADO)
+// — duplicado a propósito acá (son 4 líneas) para no crear un import cruzado entre pantalla y componente.
+const ETIQUETA_ESTADO: Record<EstadoTicket, string> = {
+  abierto: 'Abierto',
+  en_progreso: 'En progreso',
+  resuelto: 'Resuelto',
+  cerrado: 'Cerrado',
+}
+
+const ESTILO_ESTADO: Record<EstadoTicket, string> = {
+  abierto: 'bg-info/12 text-info',
+  en_progreso: 'bg-accent/12 text-accent',
+  resuelto: 'bg-success/12 text-success',
+  cerrado: 'bg-muted text-muted-foreground',
 }
 
 interface Props {
@@ -79,10 +95,15 @@ export function NotificacionesCampana({ tickets, correosPorId, onVerTodas }: Pro
                 <li key={t.id} className="border-b border-border/60 last:border-b-0">
                   <button type="button" onClick={irATodas} className="flex w-full gap-2.5 px-4 py-3 text-left hover:bg-muted">
                     <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent" />
-                    <span className="min-w-0">
-                      <p className="truncate text-[0.83rem] font-bold text-popover-foreground">
-                        {t.origen === 'pregunta' && t.preguntaNumero ? `Pregunta N.º ${t.preguntaNumero}` : ETIQUETA_ORIGEN[t.origen]}
-                      </p>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center justify-between gap-2">
+                        <p className="truncate text-[0.83rem] font-bold text-popover-foreground">
+                          {t.origen === 'pregunta' && t.preguntaNumero ? `Pregunta N.º ${t.preguntaNumero}` : ETIQUETA_ORIGEN[t.origen]}
+                        </p>
+                        <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[0.64rem] font-bold ${ESTILO_ESTADO[t.estado]}`}>
+                          {ETIQUETA_ESTADO[t.estado]}
+                        </span>
+                      </span>
                       <p className="truncate text-xs text-muted-foreground">
                         {correosPorId.get(t.usuarioId) ?? 'Usuario'} · "{t.asunto}"
                       </p>
