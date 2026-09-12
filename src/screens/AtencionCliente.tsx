@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Search, Inbox, Loader2, Send, Trash2, X, MessageCircleQuestion, Pencil } from 'lucide-react'
+import { Search, Inbox, Loader2, Send, Trash2, X, MessageCircleQuestion, Pencil, MessageSquareText, ChevronDown, Plus } from 'lucide-react'
 import {
   obtenerMensajes,
   enviarMensaje,
@@ -14,6 +14,13 @@ import {
   type EstadoTicket,
   type OrigenTicket,
 } from '@/lib/tickets'
+import {
+  listarPlantillas,
+  crearPlantilla,
+  eliminarPlantilla,
+  ordenarParaTicket,
+  type PlantillaRespuesta,
+} from '@/lib/plantillasRespuesta'
 import { EditarPreguntaModal } from '@/components/EditarPreguntaModal'
 
 interface Props {
@@ -68,6 +75,21 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
   const [orden, setOrden] = useState<'reciente' | 'antiguo' | 'estado'>('reciente')
   const [ticketAbiertoId, setTicketAbiertoId] = useState<string | null>(null)
   const [confirmandoId, setConfirmandoId] = useState<string | null>(null)
+  const [plantillas, setPlantillas] = useState<PlantillaRespuesta[]>([])
+
+  useEffect(() => {
+    listarPlantillas().then(setPlantillas)
+  }, [])
+
+  async function crearPlantillaHandler(titulo: string, cuerpo: string, categoria: OrigenTicket | null) {
+    const { ok, plantilla } = await crearPlantilla(titulo, cuerpo, categoria, adminId)
+    if (ok && plantilla) setPlantillas((prev) => [...prev, plantilla])
+  }
+
+  async function eliminarPlantillaHandler(id: string) {
+    const { ok } = await eliminarPlantilla(id)
+    if (ok) setPlantillas((prev) => prev.filter((p) => p.id !== id))
+  }
 
   const stats = useMemo(
     () => ({
@@ -301,6 +323,9 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
           ticket={ticketAbierto}
           correo={correosPorId.get(ticketAbierto.usuarioId) ?? 'usuario desconocido'}
           adminId={adminId}
+          plantillas={plantillas}
+          onCrearPlantilla={crearPlantillaHandler}
+          onEliminarPlantilla={eliminarPlantillaHandler}
           onClose={() => setTicketAbiertoId(null)}
           onRecargar={onRecargar}
         />
@@ -332,12 +357,18 @@ function ModalChat({
   ticket,
   correo,
   adminId,
+  plantillas,
+  onCrearPlantilla,
+  onEliminarPlantilla,
   onClose,
   onRecargar,
 }: {
   ticket: Ticket
   correo: string
   adminId: string
+  plantillas: PlantillaRespuesta[]
+  onCrearPlantilla: (titulo: string, cuerpo: string, categoria: OrigenTicket | null) => Promise<void>
+  onEliminarPlantilla: (id: string) => Promise<void>
   onClose: () => void
   onRecargar: () => void
 }) {
@@ -545,6 +576,13 @@ function ModalChat({
         </div>
 
         <div className="shrink-0 border-t border-border p-4">
+          <SelectorPlantillas
+            plantillas={plantillas}
+            origen={ticket.origen}
+            onElegir={(cuerpo) => setRespuesta(cuerpo)}
+            onCrear={onCrearPlantilla}
+            onEliminar={onEliminarPlantilla}
+          />
           <textarea
             value={respuesta}
             onChange={(e) => setRespuesta(e.target.value)}
@@ -578,6 +616,177 @@ function ModalChat({
           numero={ticket.preguntaNumero}
           onClose={() => setEditandoPregunta(false)}
         />
+      )}
+    </div>
+  )
+}
+
+// Menú desplegable de respuestas rápidas para el composer del chat. Un clic
+// en una plantilla INSERTA su texto en el textarea (no envía directo) — el
+// admin puede ajustar un detalle antes de mandar. Muestra primero las
+// plantillas de la categoría del ticket abierto, después las generales
+// (categoria null), el resto al final. "+ Nueva plantilla…" crea una
+// plantilla inline, sin salir del chat. Ver claude/respuestas-rapidas-tickets-diseno.md.
+function SelectorPlantillas({
+  plantillas,
+  origen,
+  onElegir,
+  onCrear,
+  onEliminar,
+}: {
+  plantillas: PlantillaRespuesta[]
+  origen: OrigenTicket
+  onElegir: (cuerpo: string) => void
+  onCrear: (titulo: string, cuerpo: string, categoria: OrigenTicket | null) => Promise<void>
+  onEliminar: (id: string) => Promise<void>
+}) {
+  const [abierto, setAbierto] = useState(false)
+  const [creando, setCreando] = useState(false)
+  const [nuevoTitulo, setNuevoTitulo] = useState('')
+  const [nuevoCuerpo, setNuevoCuerpo] = useState('')
+  const [nuevaCategoria, setNuevaCategoria] = useState<'' | OrigenTicket>(origen)
+  const [guardando, setGuardando] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!abierto) return
+    function onClickAfuera(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setAbierto(false)
+        setCreando(false)
+      }
+    }
+    document.addEventListener('mousedown', onClickAfuera)
+    return () => document.removeEventListener('mousedown', onClickAfuera)
+  }, [abierto])
+
+  const ordenadas = ordenarParaTicket(plantillas, origen)
+
+  async function guardarNueva() {
+    if (!nuevoTitulo.trim() || !nuevoCuerpo.trim() || guardando) return
+    setGuardando(true)
+    await onCrear(nuevoTitulo.trim(), nuevoCuerpo.trim(), nuevaCategoria === '' ? null : nuevaCategoria)
+    setGuardando(false)
+    setNuevoTitulo('')
+    setNuevoCuerpo('')
+    setNuevaCategoria(origen)
+    setCreando(false)
+  }
+
+  return (
+    <div className="relative mb-2" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setAbierto((v) => !v)}
+        aria-haspopup="listbox"
+        aria-expanded={abierto}
+        className="flex w-full items-center justify-between gap-2 rounded-xl border border-dashed border-accent/50 bg-accent/5 px-3 py-2 text-sm font-semibold text-accent transition hover:bg-accent/10"
+      >
+        <span className="inline-flex items-center gap-1.5">
+          <MessageSquareText className="h-4 w-4" />
+          Respuesta rápida
+        </span>
+        <ChevronDown className={`h-4 w-4 transition-transform ${abierto ? 'rotate-180' : ''}`} />
+      </button>
+
+      {abierto && (
+        <div className="absolute bottom-full left-0 z-10 mb-2 w-full max-w-sm rounded-xl border border-border bg-popover shadow-xl">
+          <ul className="max-h-56 overflow-y-auto p-1.5">
+            {ordenadas.length === 0 && !creando && (
+              <li className="px-3 py-4 text-center text-xs text-muted-foreground">Todavía no hay plantillas.</li>
+            )}
+            {ordenadas.map((p) => (
+              <li key={p.id} className="group flex items-start gap-1 rounded-lg hover:bg-muted">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onElegir(p.cuerpo)
+                    setAbierto(false)
+                  }}
+                  className="min-w-0 flex-1 px-2.5 py-2 text-left"
+                >
+                  <p className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+                    {p.titulo}
+                    {p.categoria && (
+                      <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-bold text-muted-foreground">
+                        {ETIQUETA_ORIGEN[p.categoria]}
+                      </span>
+                    )}
+                  </p>
+                  <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{p.cuerpo}</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onEliminar(p.id)}
+                  aria-label="Borrar plantilla"
+                  className="mr-1 mt-1.5 rounded p-1 text-muted-foreground opacity-0 transition hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </li>
+            ))}
+          </ul>
+
+          <div className="border-t border-border p-2">
+            {creando ? (
+              <div className="flex flex-col gap-1.5">
+                <input
+                  value={nuevoTitulo}
+                  onChange={(e) => setNuevoTitulo(e.target.value)}
+                  placeholder="Título corto (ej. Ya corregido)"
+                  className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+                <textarea
+                  value={nuevoCuerpo}
+                  onChange={(e) => setNuevoCuerpo(e.target.value)}
+                  placeholder="Texto de la respuesta"
+                  rows={2}
+                  className="resize-none rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+                <div className="flex items-center justify-between gap-1.5">
+                  <select
+                    value={nuevaCategoria}
+                    onChange={(e) => setNuevaCategoria(e.target.value as '' | OrigenTicket)}
+                    className="rounded-lg border border-border bg-background px-2 py-1 text-[11px] font-semibold text-foreground"
+                  >
+                    <option value="">General (todos)</option>
+                    <option value="pregunta">Pregunta</option>
+                    <option value="cuenta">Cuenta</option>
+                    <option value="pagos">Pagos</option>
+                    <option value="otro">Otro</option>
+                  </select>
+                  <div className="flex gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setCreando(false)}
+                      className="rounded-lg px-2.5 py-1 text-[11px] font-bold text-muted-foreground hover:bg-muted"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={guardarNueva}
+                      disabled={!nuevoTitulo.trim() || !nuevoCuerpo.trim() || guardando}
+                      className="inline-flex items-center gap-1 rounded-lg bg-accent px-2.5 py-1 text-[11px] font-bold text-accent-foreground hover:bg-accent/90 disabled:opacity-50"
+                    >
+                      {guardando && <Loader2 className="h-3 w-3 animate-spin" />}
+                      Guardar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setCreando(true)}
+                className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-bold text-accent hover:bg-muted"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Nueva plantilla…
+              </button>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )
