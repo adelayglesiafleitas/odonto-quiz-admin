@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AdminSidebar, type Vista } from '@/components/AdminSidebar'
+import { AdminSidebar, NAV, type Vista } from '@/components/AdminSidebar'
+import { NotificacionesCampana } from '@/components/NotificacionesCampana'
 import { listarUsuarios, type Usuario } from '@/lib/usuarios'
 import { listarTodosTickets, contarNoLeidos, suscribirseATickets, type Ticket } from '@/lib/tickets'
 import { Usuarios } from './Usuarios'
@@ -41,33 +42,48 @@ export function Panel({ correo, userId }: { correo: string; userId: string }) {
   const pendientes = contarNoLeidos(tickets)
   const correosPorId = new Map(usuarios.map((u) => [u.id, u.email] as const))
 
+  // Aviso en la pestaña del navegador: mismo dato que la campana de la
+  // topbar y el badge del sidebar (no_leido_admin) — mockup aprobado en
+  // claude/atencion-cliente-diseno.md.
+  useEffect(() => {
+    document.title = pendientes > 0 ? `(${pendientes}) ExamPrep · Panel admin` : 'ExamPrep · Panel admin'
+  }, [pendientes])
+
+  const tituloVista = NAV.find((n) => n.target === vista)?.label ?? ''
+
   return (
     <div className="flex min-h-screen flex-col bg-background md:flex-row">
       <AdminSidebar vista={vista} onCambiarVista={setVista} correo={correo} pendientes={pendientes} />
-      <main className="min-w-0 flex-1 px-5 py-6 md:px-9 md:py-9">
-        {vista === 'usuarios' ? (
-          <Usuarios usuarios={usuarios} cargando={cargandoUsuarios} miPropioId={userId} onRecargar={recargarUsuarios} />
-        ) : vista === 'atencion' ? (
-          <AtencionCliente
-            tickets={tickets}
-            cargando={cargandoTickets}
-            correosPorId={correosPorId}
-            adminId={userId}
-            onRecargar={recargarTickets}
-          />
-        ) : vista === 'preguntas' ? (
-          <Preguntas />
-        ) : vista === 'mensajes' ? (
-          <Mensajes usuarios={usuarios} cargandoUsuarios={cargandoUsuarios} />
-        ) : (
-          <Estadisticas
-            usuarios={usuarios}
-            cargandoUsuarios={cargandoUsuarios}
-            tickets={tickets}
-            cargandoTickets={cargandoTickets}
-          />
-        )}
-      </main>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex items-center justify-between border-b border-border bg-card/60 px-5 py-3.5 md:px-9">
+          <p className="text-[0.95rem] font-extrabold text-foreground">{tituloVista}</p>
+          <NotificacionesCampana tickets={tickets} correosPorId={correosPorId} onVerTodas={() => setVista('atencion')} />
+        </header>
+        <main className="min-w-0 flex-1 px-5 py-6 md:px-9 md:py-9">
+          {vista === 'usuarios' ? (
+            <Usuarios usuarios={usuarios} cargando={cargandoUsuarios} miPropioId={userId} onRecargar={recargarUsuarios} />
+          ) : vista === 'atencion' ? (
+            <AtencionCliente
+              tickets={tickets}
+              cargando={cargandoTickets}
+              correosPorId={correosPorId}
+              adminId={userId}
+              onRecargar={recargarTickets}
+            />
+          ) : vista === 'preguntas' ? (
+            <Preguntas />
+          ) : vista === 'mensajes' ? (
+            <Mensajes usuarios={usuarios} cargandoUsuarios={cargandoUsuarios} />
+          ) : (
+            <Estadisticas
+              usuarios={usuarios}
+              cargandoUsuarios={cargandoUsuarios}
+              tickets={tickets}
+              cargandoTickets={cargandoTickets}
+            />
+          )}
+        </main>
+      </div>
     </div>
   )
 }

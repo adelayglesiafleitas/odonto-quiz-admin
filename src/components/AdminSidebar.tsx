@@ -11,7 +11,7 @@ interface Props {
   pendientes: number
 }
 
-const NAV: { target: Vista; label: string; icon: typeof Users }[] = [
+export const NAV: { target: Vista; label: string; icon: typeof Users }[] = [
   { target: 'usuarios', label: 'Usuarios', icon: Users },
   { target: 'atencion', label: 'Atención al cliente', icon: Inbox },
   { target: 'preguntas', label: 'Preguntas', icon: BookOpen },
