@@ -195,13 +195,14 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
 
       <div className="overflow-hidden rounded-2xl border border-border bg-card">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] border-collapse">
+          <table className="w-full min-w-[940px] border-collapse">
             <thead>
               <tr className="border-b border-border text-left text-[0.7rem] font-bold uppercase tracking-wide text-muted-foreground">
                 <th className="whitespace-nowrap px-4 py-3">Usuario</th>
                 <th className="whitespace-nowrap px-4 py-3">Asunto</th>
                 <th className="whitespace-nowrap px-4 py-3">Origen</th>
                 <th className="whitespace-nowrap px-4 py-3">Estado</th>
+                <th className="whitespace-nowrap px-4 py-3">Procesado por</th>
                 <th className="whitespace-nowrap px-4 py-3">Actividad</th>
                 <th className="whitespace-nowrap px-4 py-3">
                   <span className="sr-only">Abrir</span>
@@ -211,13 +212,13 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
             <tbody>
               {cargando ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
                     <Loader2 className="mx-auto h-5 w-5 animate-spin" />
                   </td>
                 </tr>
               ) : filtrados.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                  <td colSpan={7} className="px-4 py-12 text-center text-sm text-muted-foreground">
                     {tickets.length === 0 ? (
                       <span className="flex flex-col items-center gap-2">
                         <Inbox className="h-6 w-6 text-muted-foreground/60" />
@@ -232,7 +233,7 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
                 filtrados.map((t) =>
                   confirmandoId === t.id ? (
                     <tr key={t.id} className="border-b border-border/70 text-sm last:border-b-0">
-                      <td colSpan={6} className="px-4 py-3">
+                      <td colSpan={7} className="px-4 py-3">
                         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border-l-4 border-destructive bg-destructive/10 px-3 py-2.5">
                           <p className="text-sm text-foreground">
                             ¿Eliminar <span className="font-extrabold text-destructive">&quot;{t.asunto}&quot;</span>? La conversación
@@ -289,6 +290,20 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
                           <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
                           {ETIQUETA_ESTADO[t.estado]}
                         </span>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3">
+                        {t.ultimoProcesadoPor ? (
+                          <span className="flex items-center gap-1.5">
+                            <span className="flex h-[19px] w-[19px] shrink-0 items-center justify-center rounded-full bg-accent/15 text-[0.58rem] font-extrabold text-accent">
+                              {(correosPorId.get(t.ultimoProcesadoPor) ?? '?').charAt(0).toUpperCase()}
+                            </span>
+                            <span className="font-mono text-xs text-muted-foreground">
+                              {correosPorId.get(t.ultimoProcesadoPor) ?? 'admin desconocido'}
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="text-xs italic text-muted-foreground">— sin responder aún —</span>
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 font-mono text-muted-foreground">{formatoRelativo(t.ultimaActividadEn)}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-right">
@@ -419,7 +434,7 @@ function ModalChat({
   }
 
   async function cambiarEstado(estado: EstadoTicket) {
-    await actualizarEstadoTicket(ticket.id, estado)
+    await actualizarEstadoTicket(ticket.id, estado, adminId)
     onRecargar()
   }
 

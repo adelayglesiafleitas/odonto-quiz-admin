@@ -51,7 +51,7 @@ function mapPregunta(fila: any): Pregunta {
   }
 }
 
-// Las asignaturas reales de la app (mismo cursoId que usan lib/cursos.ts y
+// Las 4 asignaturas reales de la app (mismo cursoId que usan lib/cursos.ts y
 // lib/data.ts del lado del cliente, mismos nombres que ve el alumno en
 // "¿Qué vas a examinar?" — ver lib/asignaturas.ts allá). Se fija esta lista
 // acá en vez de calcularla con un SELECT distinct: `asignatura` (el texto de
@@ -63,22 +63,30 @@ function mapPregunta(fila: any): Pregunta {
 // de 1000 filas por pedido, así que un SELECT sin acotar sobre 20 mil+ filas
 // podía perderse asignaturas enteras (el bug real que se vio: "2
 // Asignaturas" en vez de 4).
-//
-// `odontologia_libro` (307 preguntas, capítulos del libro de Inmaculada
-// Tomás) se cargó aislado de `odontologia` a propósito (ver
-// claude/pacientes-especiales-libro-capitulo-diseno.md) para no mezclarse
-// con el banco de examen normal — pero eso lo dejaba también invisible acá
-// en el admin, sin forma de revisarlo o corregirlo. Se agrega como una
-// entrada más para que la doctora pueda editarlo igual que el resto, aunque
-// el alumno todavía lo vea por separado (gateado por
-// `libro_pacientes_especiales_habilitado`).
 export const ASIGNATURAS_ADMIN: { cursoId: string; nombre: string }[] = [
   { cursoId: 'odontologia', nombre: 'Pacientes especiales' },
-  { cursoId: 'odontologia_libro', nombre: 'Pacientes especiales — Libro (Inmaculada Tomás)' },
   { cursoId: 'psicologia', nombre: 'Psicología' },
   { cursoId: 'ortodoncia', nombre: 'Ortodoncia' },
   { cursoId: 'materiales', nombre: 'Materiales Odontológicos' },
 ]
+
+// `odontologia_libro` (307 preguntas, capítulos del libro de Inmaculada
+// Tomás) se cargó con un `curso_id` propio, aislado de `odontologia` a
+// propósito (ver claude/pacientes-especiales-libro-capitulo-diseno.md) para
+// que el alumno lo siga viendo como algo separado, gateado por
+// `libro_pacientes_especiales_habilitado`. Pero para revisarlas/corregirlas
+// en este admin, Alejandro pidió que aparezcan DENTRO de "Pacientes
+// especiales" (no como una asignatura aparte) — así que acá, solo del lado
+// del admin, se pide por los dos curso_id reales juntos cuando se elige
+// "Pacientes especiales". No es una migración de datos: el curso_id de cada
+// fila en la tabla no cambia, esto solo une la consulta.
+const CURSO_IDS_REALES: Record<string, string[]> = {
+  odontologia: ['odontologia', 'odontologia_libro'],
+}
+
+function cursoIdsReales(cursoId: string): string[] {
+  return CURSO_IDS_REALES[cursoId] ?? [cursoId]
+}
 
 export interface FiltrosPreguntas {
   cursoId: string | null
@@ -103,7 +111,7 @@ export async function listarPreguntas(filtros: FiltrosPreguntas): Promise<Result
 
   let query = supabase.from('preguntas').select('*', { count: 'exact' })
 
-  if (filtros.cursoId) query = query.eq('curso_id', filtros.cursoId)
+  if (filtros.cursoId) query = query.in('curso_id', cursoIdsReales(filtros.cursoId))
   if (filtros.capitulo) query = query.eq('capitulo', filtros.capitulo)
 
   const busqueda = filtros.busqueda?.trim()
@@ -133,13 +141,15 @@ export interface AsignaturaConConteo {
 // Conteo exacto por asignatura vía `count: 'exact', head: true` (4 pedidos
 // en paralelo, uno por curso fijo de ASIGNATURAS_ADMIN) — nunca trae filas,
 // así que no importa que Ortodoncia tenga 17k+: el número siempre es exacto.
+// "Pacientes especiales" cuenta también las 307 de `odontologia_libro` (ver
+// cursoIdsReales) — el número que se ve al lado del nombre ya sale sumado.
 export async function listarAsignaturasConConteo(): Promise<AsignaturaConConteo[]> {
   const resultados = await Promise.all(
     ASIGNATURAS_ADMIN.map(async ({ cursoId, nombre }) => {
       const { count, error } = await supabase
         .from('preguntas')
         .select('*', { count: 'exact', head: true })
-        .eq('curso_id', cursoId)
+        .in('curso_id', cursoIdsReales(cursoId))
       if (error) console.error(`Error al contar preguntas de "${cursoId}":`, error.message)
       return { cursoId, nombre, total: count ?? 0 }
     }),
@@ -154,13 +164,24 @@ export async function listarAsignaturasConConteo(): Promise<AsignaturaConConteo[
 // causó el bug de "2 Asignaturas": PostgREST no devuelve más de 1000 filas
 // por pedido, así que podría faltar un capítulo que solo aparece más allá de
 // la fila 1000.
+//
+// El RPC recibe un solo curso_id, así que para "Pacientes especiales" (que
+// junta `odontologia` + `odontologia_libro`, ver cursoIdsReales) se pide una
+// vez por cada curso_id real y se juntan los resultados — dos pedidos
+// livianos (nunca traen filas), no una migración del RPC.
 export async function listarCapitulos(cursoId: string): Promise<string[]> {
-  const { data, error } = await supabase.rpc('preguntas_capitulos_distintos', { p_curso_id: cursoId })
-  if (error) {
-    console.error('Error al listar capítulos:', error.message)
-    return []
-  }
-  return ((data ?? []) as { capitulo: string | null }[]).map((f) => f.capitulo).filter((c): c is string => c != null)
+  const resultados = await Promise.all(
+    cursoIdsReales(cursoId).map(async (id) => {
+      const { data, error } = await supabase.rpc('preguntas_capitulos_distintos', { p_curso_id: id })
+      if (error) {
+        console.error('Error al listar capítulos:', error.message)
+        return []
+      }
+      return ((data ?? []) as { capitulo: string | null }[]).map((f) => f.capitulo).filter((c): c is string => c != null)
+    }),
+  )
+  // Dedup preservando el orden en que aparece cada capítulo la primera vez.
+  return Array.from(new Set(resultados.flat()))
 }
 
 export interface EstadisticasPreguntas {

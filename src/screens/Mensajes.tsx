@@ -24,12 +24,15 @@ import {
   Info,
   TriangleAlert,
   X,
+  Pencil,
+  Save,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { Usuario } from '@/lib/usuarios'
 import {
   listarMensajes,
   crearMensaje,
+  editarMensaje,
   cambiarActivoMensaje,
   eliminarMensaje,
   type MensajeAdmin,
@@ -146,6 +149,7 @@ export function Mensajes({ usuarios, cargandoUsuarios }: { usuarios: Usuario[]; 
   const [cargando, setCargando] = useState(true)
   const [errorAccion, setErrorAccion] = useState<string | null>(null)
   const [compositorAbierto, setCompositorAbierto] = useState(false)
+  const [mensajeAEditar, setMensajeAEditar] = useState<MensajeAdmin | null>(null)
 
   const [menuAbiertoId, setMenuAbiertoId] = useState<string | null>(null)
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null)
@@ -202,6 +206,12 @@ export function Mensajes({ usuarios, cargandoUsuarios }: { usuarios: Usuario[]; 
     setMenuAbiertoId(null)
     setErrorAccion(null)
     setConfirmacion({ tipo, mensaje })
+  }
+
+  function editar(mensaje: MensajeAdmin) {
+    setMenuAbiertoId(null)
+    setErrorAccion(null)
+    setMensajeAEditar(mensaje)
   }
 
   async function confirmar() {
@@ -358,6 +368,8 @@ export function Mensajes({ usuarios, cargandoUsuarios }: { usuarios: Usuario[]; 
         if (!m) return null
         return (
           <div ref={menuRef} style={{ top: menuPos.top, left: menuPos.left }} className="fixed z-40 w-56 animate-float-up rounded-2xl border border-border bg-popover p-1.5 shadow-xl">
+            <MenuItem icono={Pencil} etiqueta="Editar" onClick={() => editar(m)} />
+            <div className="my-1 h-px bg-border" />
             {m.activo ? (
               <MenuItem icono={Pause} etiqueta="Desactivar" onClick={() => pedirConfirmacion('desactivar', m)} />
             ) : (
@@ -373,13 +385,18 @@ export function Mensajes({ usuarios, cargandoUsuarios }: { usuarios: Usuario[]; 
         <ModalConfirmacion confirmacion={confirmacion} cargando={confirmando} onCancelar={() => setConfirmacion(null)} onConfirmar={confirmar} />
       )}
 
-      {compositorAbierto && (
+      {(compositorAbierto || mensajeAEditar) && (
         <ModalNuevoMensaje
           usuarios={usuarios}
           cargandoUsuarios={cargandoUsuarios}
-          onCerrar={() => setCompositorAbierto(false)}
-          onCreado={() => {
+          mensajeAEditar={mensajeAEditar}
+          onCerrar={() => {
             setCompositorAbierto(false)
+            setMensajeAEditar(null)
+          }}
+          onGuardado={() => {
+            setCompositorAbierto(false)
+            setMensajeAEditar(null)
             recargar()
           }}
         />
@@ -447,21 +464,25 @@ const segmentInactivo = 'text-muted-foreground hover:bg-muted'
 function ModalNuevoMensaje({
   usuarios,
   cargandoUsuarios,
+  mensajeAEditar,
   onCerrar,
-  onCreado,
+  onGuardado,
 }: {
   usuarios: Usuario[]
   cargandoUsuarios: boolean
+  mensajeAEditar: MensajeAdmin | null
   onCerrar: () => void
-  onCreado: () => void
+  onGuardado: () => void
 }) {
-  const [tipo, setTipo] = useState<TipoMensajeAdmin>('texto')
-  const [destinatario, setDestinatario] = useState<'todos' | 'uno'>('todos')
-  const [destinatarioUserId, setDestinatarioUserId] = useState('')
-  const [texto, setTexto] = useState('')
+  const esEdicion = mensajeAEditar !== null
+
+  const [tipo, setTipo] = useState<TipoMensajeAdmin>(mensajeAEditar?.tipo ?? 'texto')
+  const [destinatario, setDestinatario] = useState<'todos' | 'uno'>(mensajeAEditar?.destinatarioUserId ? 'uno' : 'todos')
+  const [destinatarioUserId, setDestinatarioUserId] = useState(mensajeAEditar?.destinatarioUserId ?? '')
+  const [texto, setTexto] = useState(mensajeAEditar?.texto ?? '')
   const [mediaFile, setMediaFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const [mostrarSiempre, setMostrarSiempre] = useState(false)
+  const [mostrarSiempre, setMostrarSiempre] = useState(mensajeAEditar?.mostrarSiempre ?? false)
   const [confirmandoTodos, setConfirmandoTodos] = useState(false)
   const [enviando, setEnviando] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -475,36 +496,54 @@ function ModalNuevoMensaje({
 
   const necesitaTexto = tipo === 'texto' || tipo === 'texto_foto'
   const necesitaMedia = tipo === 'texto_foto' || tipo === 'video'
+  // Al editar, solo tiene sentido conservar el archivo que ya tenía la fila
+  // si el tipo no cambió (un video no puede pasar a ser "el archivo" de un
+  // texto_foto). Si el tipo cambió a otro que también lleva archivo, hace
+  // falta elegir uno nuevo.
+  const puedeMantenerMediaActual = esEdicion && necesitaMedia && mensajeAEditar!.tipo === tipo && !!mensajeAEditar!.mediaUrl
   const puedeEnviar =
     (!necesitaTexto || texto.trim().length > 0) &&
-    (!necesitaMedia || mediaFile !== null) &&
+    (!necesitaMedia || mediaFile !== null || puedeMantenerMediaActual) &&
     (destinatario === 'todos' || destinatarioUserId !== '')
 
-  async function enviar() {
+  async function guardar() {
     setEnviando(true)
     setError(null)
-    const resultado = await crearMensaje({
-      tipo,
-      texto: necesitaTexto ? texto.trim() : null,
-      mediaFile: necesitaMedia ? mediaFile : null,
-      destinatarioUserId: destinatario === 'todos' ? null : destinatarioUserId,
-      mostrarSiempre,
-    })
+
+    const resultado = esEdicion
+      ? await editarMensaje(mensajeAEditar!.id, mensajeAEditar!.mediaUrl, {
+          tipo,
+          texto: necesitaTexto ? texto.trim() : null,
+          mediaFile: necesitaMedia ? mediaFile : null,
+          mantenerMediaActual: puedeMantenerMediaActual,
+          destinatarioUserId: destinatario === 'todos' ? null : destinatarioUserId,
+          mostrarSiempre,
+        })
+      : await crearMensaje({
+          tipo,
+          texto: necesitaTexto ? texto.trim() : null,
+          mediaFile: necesitaMedia ? mediaFile : null,
+          destinatarioUserId: destinatario === 'todos' ? null : destinatarioUserId,
+          mostrarSiempre,
+        })
+
     setEnviando(false)
     if (resultado.ok) {
-      onCreado()
+      onGuardado()
     } else {
-      setError(resultado.error ?? 'No se pudo enviar el mensaje.')
+      setError(resultado.error ?? (esEdicion ? 'No se pudo guardar los cambios.' : 'No se pudo enviar el mensaje.'))
       setConfirmandoTodos(false)
     }
   }
 
-  function onClickEnviar() {
-    if (destinatario === 'todos' && !confirmandoTodos) {
+  function onClickGuardar() {
+    // Editar no vuelve a pedir la confirmación de "a todos" — no es un
+    // envío nuevo, ya le llegó a esos usuarios.
+    if (!esEdicion && destinatario === 'todos' && !confirmandoTodos) {
       setConfirmandoTodos(true)
       return
     }
-    enviar()
+    guardar()
   }
 
   return (
@@ -512,8 +551,10 @@ function ModalNuevoMensaje({
       <div className="flex max-h-[88vh] w-full max-w-md flex-col gap-4 overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-xl">
         <div className="flex items-start justify-between">
           <div>
-            <h2 className="text-base font-extrabold text-foreground">Nuevo mensaje</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">Va a aparecer en Home de la app.</p>
+            <h2 className="text-base font-extrabold text-foreground">{esEdicion ? 'Editar mensaje' : 'Nuevo mensaje'}</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {esEdicion ? 'Los cambios se reflejan al instante en Home.' : 'Va a aparecer en Home de la app.'}
+            </p>
           </div>
           <button type="button" onClick={onCerrar} className="rounded-lg p-1 text-muted-foreground hover:bg-muted"><X className="h-4 w-4" /></button>
         </div>
@@ -583,19 +624,30 @@ function ModalNuevoMensaje({
                 ) : (
                   <img src={previewUrl} alt="" className="h-16 w-11 rounded-lg object-cover" />
                 )
+              ) : puedeMantenerMediaActual ? (
+                tipo === 'video' ? (
+                  <video src={mensajeAEditar!.mediaUrl!} className="h-16 w-11 rounded-lg object-cover" muted />
+                ) : (
+                  <img src={mensajeAEditar!.mediaUrl!} alt="" className="h-16 w-11 rounded-lg object-cover" />
+                )
               ) : (
                 <div className="flex h-16 w-11 items-center justify-center rounded-lg bg-muted text-muted-foreground">
                   {tipo === 'video' ? <Video className="h-4 w-4" /> : <ImageIcon className="h-4 w-4" />}
                 </div>
               )}
               <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-semibold text-foreground">{mediaFile ? mediaFile.name : 'Ningún archivo elegido'}</p>
+                <p className="truncate text-xs font-semibold text-foreground">
+                  {mediaFile ? mediaFile.name : puedeMantenerMediaActual ? 'Archivo actual' : 'Ningún archivo elegido'}
+                </p>
                 <label className="mt-1 inline-block cursor-pointer text-xs font-bold text-accent hover:underline">
-                  {mediaFile ? 'Cambiar archivo' : 'Elegir archivo'}
+                  {mediaFile || puedeMantenerMediaActual ? 'Cambiar archivo' : 'Elegir archivo'}
                   <input type="file" accept={tipo === 'video' ? 'video/*' : 'image/*'} onChange={elegirArchivo} className="hidden" />
                 </label>
               </div>
             </div>
+            {puedeMantenerMediaActual && !mediaFile && (
+              <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">Si subís uno nuevo, el actual se borra del bucket.</p>
+            )}
             {tipo === 'video' && (
               <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
                 Se muestra a pantalla completa apenas se entra a Home (no como banner chico). Recomendado: menos de 30s y 20 MB.
@@ -620,9 +672,21 @@ function ModalNuevoMensaje({
 
         <div className="mt-1 flex justify-end gap-2.5">
           <Button type="button" variant="outline" onClick={onCerrar} disabled={enviando}>Cancelar</Button>
-          <Button type="button" variant="accent" onClick={onClickEnviar} disabled={!puedeEnviar || enviando}>
-            {enviando && <Loader2 className="h-4 w-4 animate-spin" />}
-            {enviando ? 'Enviando…' : confirmandoTodos ? 'Sí, enviar a todos' : 'Enviar mensaje'}
+          <Button type="button" variant="accent" onClick={onClickGuardar} disabled={!puedeEnviar || enviando}>
+            {enviando ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : esEdicion ? (
+              <Save className="h-4 w-4" />
+            ) : null}
+            {enviando
+              ? esEdicion
+                ? 'Guardando…'
+                : 'Enviando…'
+              : esEdicion
+                ? 'Guardar cambios'
+                : confirmandoTodos
+                  ? 'Sí, enviar a todos'
+                  : 'Enviar mensaje'}
           </Button>
         </div>
       </div>

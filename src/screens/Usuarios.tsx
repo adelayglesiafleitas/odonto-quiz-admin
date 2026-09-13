@@ -14,9 +14,12 @@ import {
   EyeOff,
   Lock,
   Unlock,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { PanelEstadisticasUsuario } from '@/components/PanelEstadisticasUsuario'
+import { getCookie, setCookie } from '@/lib/cookies'
 import {
   emailPareceSospechoso,
   otorgarAdmin,
@@ -39,6 +42,20 @@ function fmt(fecha: string | null): string {
 
 const inputBase =
   'h-10 rounded-xl border border-border bg-card px-3 text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+
+// Paginado de la tabla. El tamaño elegido se guarda en una cookie (mismo
+// mecanismo que ya usa el modo oscuro/claro en `lib/tema.ts`) para que la
+// próxima vez que se entre a Usuarios arranque con la misma preferencia —
+// la página en la que se estaba NO se guarda, siempre se arranca en la 1.
+const TAMANOS_PAGINA = [10, 25, 50, 100] as const
+type TamanoPagina = (typeof TAMANOS_PAGINA)[number]
+const TAMANO_PAGINA_DEFAULT: TamanoPagina = 25
+const TAMANO_PAGINA_COOKIE = 'examprep_admin_usuarios_por_pagina'
+
+function getTamanoPaginaGuardado(): TamanoPagina {
+  const valor = Number(getCookie(TAMANO_PAGINA_COOKIE))
+  return (TAMANOS_PAGINA as readonly number[]).includes(valor) ? (valor as TamanoPagina) : TAMANO_PAGINA_DEFAULT
+}
 
 interface Props {
   usuarios: Usuario[]
@@ -207,6 +224,8 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
   const [busqueda, setBusqueda] = useState('')
   const [rol, setRol] = useState<FiltroRol>('todos')
   const [actividad, setActividad] = useState<FiltroActividad>('todos')
+  const [porPagina, setPorPagina] = useState<TamanoPagina>(getTamanoPaginaGuardado)
+  const [pagina, setPagina] = useState(0)
 
   const [procesandoId, setProcesandoId] = useState<string | null>(null)
   const [errorAccion, setErrorAccion] = useState<string | null>(null)
@@ -330,6 +349,24 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
   const hayFiltros = busqueda.trim() !== '' || rol !== 'todos' || actividad !== 'todos'
   const usuarioMenu = menuAbiertoId ? usuarios.find((u) => u.id === menuAbiertoId) ?? null : null
 
+  // Buscar, cambiar de filtro o de tamaño de página siempre vuelve a la
+  // primera página — evita quedar en una página vacía (mismo criterio que
+  // ya usa el paginado de Preguntas.tsx).
+  useEffect(() => {
+    setPagina(0)
+  }, [busqueda, rol, actividad, porPagina])
+
+  function cambiarPorPagina(valor: TamanoPagina) {
+    setPorPagina(valor)
+    setCookie(TAMANO_PAGINA_COOKIE, String(valor))
+  }
+
+  const total = filtrados.length
+  const desde = total === 0 ? 0 : pagina * porPagina + 1
+  const hasta = Math.min(total, (pagina + 1) * porPagina)
+  const totalPaginas = Math.max(1, Math.ceil(total / porPagina))
+  const paginados = filtrados.slice(pagina * porPagina, pagina * porPagina + porPagina)
+
   return (
     <section>
       <div className="mb-6">
@@ -379,9 +416,25 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
           </button>
         )}
       </div>
-      <p className="mb-3 text-xs font-semibold text-muted-foreground">
-        {cargando ? 'Cargando…' : hayFiltros ? `${filtrados.length} de ${usuarios.length} usuarios` : `${usuarios.length} usuarios`}
-      </p>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-muted-foreground">
+          {cargando ? 'Cargando…' : total === 0 ? '0 usuarios' : `${desde}–${hasta} de ${total} usuarios`}
+        </p>
+        <label className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+          Filas por página
+          <select
+            value={porPagina}
+            onChange={(e) => cambiarPorPagina(Number(e.target.value) as TamanoPagina)}
+            className="h-8 rounded-lg border border-border bg-card px-2 text-xs font-bold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            {TAMANOS_PAGINA.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
 
       {errorAccion && (
         <div className="mb-3 flex items-center gap-2 rounded-xl bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive">
@@ -395,6 +448,7 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
           <table className="w-full min-w-[780px] border-collapse">
             <thead>
               <tr className="border-b border-border text-left text-[0.7rem] font-bold uppercase tracking-wide text-muted-foreground">
+                <th className="whitespace-nowrap px-4 py-3 text-right">#</th>
                 <th className="whitespace-nowrap px-4 py-3">Usuario</th>
                 <th className="whitespace-nowrap px-4 py-3">Alta</th>
                 <th className="whitespace-nowrap px-4 py-3">Último acceso</th>
@@ -411,24 +465,27 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
             <tbody>
               {cargando ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">
                     <Loader2 className="mx-auto h-5 w-5 animate-spin" />
                   </td>
                 </tr>
               ) : filtrados.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                  <td colSpan={10} className="px-4 py-12 text-center text-sm text-muted-foreground">
                     {usuarios.length === 0 ? 'Todavía no hay usuarios registrados.' : 'Ningún usuario coincide con estos filtros.'}
                   </td>
                 </tr>
               ) : (
-                filtrados.map((u) => (
+                paginados.map((u, i) => (
                   <tr
                     key={u.id}
                     className={`border-b border-border/70 text-sm last:border-b-0 hover:bg-muted/50 ${
                       menuAbiertoId === u.id ? 'bg-muted/50' : ''
                     }`}
                   >
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums text-muted-foreground">
+                      {pagina * porPagina + i + 1}
+                    </td>
                     <td className="px-4 py-3">
                       <button
                         type="button"
@@ -486,6 +543,34 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
           </table>
         </div>
       </div>
+
+      {total > porPagina && (
+        <div className="mt-4 flex items-center justify-between">
+          <p className="text-xs text-muted-foreground">
+            Página {pagina + 1} de {totalPaginas}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPagina((p) => Math.max(0, p - 1))}
+              disabled={pagina === 0}
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
+              aria-label="Página anterior"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setPagina((p) => (hasta < total ? p + 1 : p))}
+              disabled={hasta >= total}
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
+              aria-label="Página siguiente"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       <p className="mt-4 flex max-w-[62ch] items-start gap-2 text-xs leading-relaxed text-muted-foreground">
         <UsersIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />

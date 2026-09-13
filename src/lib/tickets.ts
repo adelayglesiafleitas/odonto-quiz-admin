@@ -20,6 +20,10 @@ export interface Ticket {
   asunto: string
   estado: EstadoTicket
   noLeidoAdmin: boolean
+  // Último admin que respondió un mensaje o cambió el estado — null hasta
+  // que algún admin haga alguna de las dos cosas. Ver columna "Procesado
+  // por" en AtencionCliente.tsx y claude/atencion-cliente-diseno.md.
+  ultimoProcesadoPor: string | null
 }
 
 export interface Mensaje {
@@ -45,6 +49,7 @@ function mapTicket(fila: any): Ticket {
     asunto: fila.asunto,
     estado: fila.estado,
     noLeidoAdmin: fila.no_leido_admin,
+    ultimoProcesadoPor: fila.ultimo_procesado_por,
   }
 }
 
@@ -96,8 +101,12 @@ export async function marcarLeidoAdmin(ticketId: string): Promise<void> {
   await supabase.from('tickets').update({ no_leido_admin: false }).eq('id', ticketId)
 }
 
-export async function actualizarEstadoTicket(ticketId: string, estado: EstadoTicket): Promise<{ ok: boolean }> {
-  const { error } = await supabase.from('tickets').update({ estado }).eq('id', ticketId)
+// `adminId` queda como "Procesado por" — cambiar el estado cuenta como
+// procesar el ticket, igual que responder un mensaje (eso lo marca el
+// trigger `tickets_al_llegar_mensaje` del lado de la base; acá se marca a
+// mano porque cambiar el estado no pasa por la tabla `mensajes`).
+export async function actualizarEstadoTicket(ticketId: string, estado: EstadoTicket, adminId: string): Promise<{ ok: boolean }> {
+  const { error } = await supabase.from('tickets').update({ estado, ultimo_procesado_por: adminId }).eq('id', ticketId)
   if (error) {
     console.error('Error al actualizar el estado del ticket:', error.message)
     return { ok: false }
