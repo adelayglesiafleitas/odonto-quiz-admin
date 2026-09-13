@@ -84,7 +84,10 @@ const CURSO_IDS_REALES: Record<string, string[]> = {
   odontologia: ['odontologia', 'odontologia_libro'],
 }
 
-function cursoIdsReales(cursoId: string): string[] {
+// Exportada para que `lib/estadisticas.ts` pueda contar preguntas ocultas
+// por asignatura (widget "Reportes de errores") con el mismo criterio exacto
+// que `listarAsignaturasConConteo` — nunca duplicar esta lista a mano.
+export function cursoIdsReales(cursoId: string): string[] {
   return CURSO_IDS_REALES[cursoId] ?? [cursoId]
 }
 

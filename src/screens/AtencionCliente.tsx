@@ -22,6 +22,7 @@ import {
   type PlantillaRespuesta,
 } from '@/lib/plantillasRespuesta'
 import { EditarPreguntaModal } from '@/components/EditarPreguntaModal'
+import { colorAsignatura } from '@/lib/coloresAsignatura'
 
 interface Props {
   tickets: Ticket[]
@@ -193,14 +194,20 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
         {cargando ? 'Cargando…' : hayFiltros ? `${filtrados.length} de ${tickets.length} tickets` : `${tickets.length} tickets`}
       </p>
 
+      {/* Columna "Asignatura" (2026-09-13): no es un dato nuevo — `preguntaAsignatura`
+          ya se guardaba en `tickets.pregunta_asignatura` desde que se crea el ticket
+          (`crear_ticket()`, cuando origen='pregunta') y hasta ahora solo se mostraba
+          adentro del modal de chat. Se agrega acá para verla sin abrir el ticket. Ver
+          claude/atencion-cliente-diseno.md. */}
       <div className="overflow-hidden rounded-2xl border border-border bg-card">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[940px] border-collapse">
+          <table className="w-full min-w-[1040px] border-collapse">
             <thead>
               <tr className="border-b border-border text-left text-[0.7rem] font-bold uppercase tracking-wide text-muted-foreground">
                 <th className="whitespace-nowrap px-4 py-3">Usuario</th>
                 <th className="whitespace-nowrap px-4 py-3">Asunto</th>
                 <th className="whitespace-nowrap px-4 py-3">Origen</th>
+                <th className="whitespace-nowrap px-4 py-3">Asignatura</th>
                 <th className="whitespace-nowrap px-4 py-3">Estado</th>
                 <th className="whitespace-nowrap px-4 py-3">Procesado por</th>
                 <th className="whitespace-nowrap px-4 py-3">Actividad</th>
@@ -212,13 +219,13 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
             <tbody>
               {cargando ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
                     <Loader2 className="mx-auto h-5 w-5 animate-spin" />
                   </td>
                 </tr>
               ) : filtrados.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                  <td colSpan={8} className="px-4 py-12 text-center text-sm text-muted-foreground">
                     {tickets.length === 0 ? (
                       <span className="flex flex-col items-center gap-2">
                         <Inbox className="h-6 w-6 text-muted-foreground/60" />
@@ -233,7 +240,7 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
                 filtrados.map((t) =>
                   confirmandoId === t.id ? (
                     <tr key={t.id} className="border-b border-border/70 text-sm last:border-b-0">
-                      <td colSpan={7} className="px-4 py-3">
+                      <td colSpan={8} className="px-4 py-3">
                         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border-l-4 border-destructive bg-destructive/10 px-3 py-2.5">
                           <p className="text-sm text-foreground">
                             ¿Eliminar <span className="font-extrabold text-destructive">&quot;{t.asunto}&quot;</span>? La conversación
@@ -284,6 +291,13 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
                         <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold text-muted-foreground">
                           {ETIQUETA_ORIGEN[t.origen]}
                         </span>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3">
+                        {t.preguntaAsignatura ? (
+                          <span className={`text-xs font-bold ${colorAsignatura(t.preguntaAsignatura).text}`}>{t.preguntaAsignatura}</span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3">
                         <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-bold ${ESTILO_ESTADO[t.estado]}`}>

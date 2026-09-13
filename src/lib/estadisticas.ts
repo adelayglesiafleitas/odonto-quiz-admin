@@ -1,6 +1,8 @@
 import { supabase } from './supabase'
 import type { Usuario } from './usuarios'
-import type { Ticket } from './tickets'
+import type { Ticket, EstadoTicket } from './tickets'
+import { ASIGNATURAS_ADMIN, cursoIdsReales } from './preguntas'
+import { colorAsignatura, type ColorAsignatura } from './coloresAsignatura'
 
 // Estadísticas agregadas de uso e interacción para el admin (ver
 // claude/estadisticas-admin-diseno.md en el proyecto de Claude). Todo se
@@ -45,6 +47,36 @@ export interface RankingItem {
   nombre: string
   cantidad: number
   pct: number
+  // Opcional — cuando se completa, el `Ranking` de Estadisticas.tsx pinta ese
+  // ítem con el color fijo de la asignatura (mismo mapa que usa la columna
+  // "Asignatura" en AtencionCliente.tsx) en vez del celeste por defecto.
+  color?: ColorAsignatura
+}
+
+export interface PreguntaReportada {
+  numero: number
+  asignatura: string
+  capitulo: string | null
+  veces: number
+  estado: EstadoTicket
+}
+
+export interface CapituloReporteVsFallo {
+  capitulo: string
+  asignatura: string
+  reportes: number
+  // null cuando ese capítulo todavía no tiene suficientes intentos con
+  // desglose (mismo mínimo de 3 preguntas vistas que usa capitulosMasFallos).
+  pctFalladoReal: number | null
+  enAmbosRankings: boolean
+}
+
+export interface ResolucionAsignatura {
+  asignatura: string
+  color: ColorAsignatura
+  abiertos: number
+  resueltos: number
+  total: number
 }
 
 export interface MensajeAlcance {
@@ -78,6 +110,14 @@ export interface EstadisticasApp {
     conTiempo: number
   }
   capitulosMasFallos: RankingItem[]
+  // Bloque "Reportes de errores" (2026-09-13) — de los tickets con
+  // origen='pregunta', ver claude/atencion-cliente-diseno.md /
+  // claude/estadisticas-admin-diseno.md.
+  reportesPorAsignatura: RankingItem[]
+  preguntasMasReportadas: PreguntaReportada[]
+  capitulosReportadoVsFallado: CapituloReporteVsFallo[]
+  resolucionReportesPorAsignatura: ResolucionAsignatura[]
+  preguntasOcultasPorAsignatura: RankingItem[]
   onboarding: {
     vieron: number
     total: number
@@ -246,13 +286,135 @@ export async function obtenerEstadisticas(usuarios: Usuario[], tickets: Ticket[]
     .sort((a, b) => b.pct - a.pct)
     .slice(0, 6)
 
-  // ---- 7 y 8. Onboarding (tour) + embudo de activación. ----
+  // ---- 7 a 11. Reportes de errores (tickets con origen='pregunta'),
+  // agregados por asignatura — bloque agregado 2026-09-13, ver
+  // claude/atencion-cliente-diseno.md. Ninguno de estos 5 pide RPC nueva:
+  // 7-10 salen de `tickets` (ya vienen como prop), 11 hace un puñado de
+  // COUNT exactos sobre `preguntas` sin traer filas (mismo patrón que
+  // `listarAsignaturasConConteo` en lib/preguntas.ts).
+  const ticketsPregunta = tickets.filter((t) => t.origen === 'pregunta')
+
+  // 7. Asignaturas con más reportes.
+  const reportesPorAsignaturaMap = new Map<string, number>()
+  for (const t of ticketsPregunta) {
+    const a = t.preguntaAsignatura ?? 'Sin asignatura'
+    reportesPorAsignaturaMap.set(a, (reportesPorAsignaturaMap.get(a) ?? 0) + 1)
+  }
+  const totalReportesPregunta = ticketsPregunta.length
+  const reportesPorAsignatura: RankingItem[] = Array.from(reportesPorAsignaturaMap.entries())
+    .map(([asignatura, cantidad]) => ({
+      clave: asignatura,
+      nombre: asignatura,
+      cantidad,
+      pct: totalReportesPregunta > 0 ? Math.round((cantidad / totalReportesPregunta) * 100) : 0,
+      color: colorAsignatura(asignatura),
+    }))
+    .sort((a, b) => b.cantidad - a.cantidad)
+
+  // 8. Preguntas más reportadas — misma (asignatura, número) en más de un
+  // ticket. Se queda con el capítulo/estado del ticket más reciente de cada
+  // pregunta, pero cuenta TODOS los tickets de esa pregunta en `veces`.
+  const porPreguntaMap = new Map<
+    string,
+    { asignatura: string; capitulo: string | null; numero: number; veces: number; estado: EstadoTicket; actividad: string }
+  >()
+  for (const t of ticketsPregunta) {
+    if (t.preguntaNumero == null || !t.preguntaAsignatura) continue
+    const clave = `${t.preguntaAsignatura}__${t.preguntaNumero}`
+    const actual = porPreguntaMap.get(clave)
+    if (!actual || new Date(t.ultimaActividadEn).getTime() > new Date(actual.actividad).getTime()) {
+      porPreguntaMap.set(clave, {
+        asignatura: t.preguntaAsignatura,
+        capitulo: t.preguntaCapitulo,
+        numero: t.preguntaNumero,
+        veces: (actual?.veces ?? 0) + 1,
+        estado: t.estado,
+        actividad: t.ultimaActividadEn,
+      })
+    } else {
+      actual.veces += 1
+    }
+  }
+  const preguntasMasReportadas: PreguntaReportada[] = Array.from(porPreguntaMap.values())
+    .filter((p) => p.veces >= 2)
+    .sort((a, b) => b.veces - a.veces)
+    .slice(0, 8)
+    .map((p) => ({ numero: p.numero, asignatura: p.asignatura, capitulo: p.capitulo, veces: p.veces, estado: p.estado }))
+
+  // 9. Reportado vs. fallado real, por capítulo — cruza el conteo de
+  // reportes de este bloque con `acumCapitulos` (ya calculado arriba para el
+  // widget 6, mismo mínimo de 3 preguntas vistas para dar un % real).
+  const reportesPorCapituloMap = new Map<string, { asignatura: string; reportes: number }>()
+  for (const t of ticketsPregunta) {
+    if (!t.preguntaCapitulo) continue
+    const actual = reportesPorCapituloMap.get(t.preguntaCapitulo) ?? { asignatura: t.preguntaAsignatura ?? 'Sin asignatura', reportes: 0 }
+    actual.reportes += 1
+    reportesPorCapituloMap.set(t.preguntaCapitulo, actual)
+  }
+  const capitulosMasFalladosClaves = new Set(capitulosMasFallos.map((c) => c.clave))
+  const capitulosReportadoVsFallado: CapituloReporteVsFallo[] = Array.from(reportesPorCapituloMap.entries())
+    .map(([capitulo, { asignatura, reportes }]) => {
+      const real = acumCapitulos.get(capitulo)
+      const pctFalladoReal = real && real.total >= 3 ? Math.round((1 - real.correctas / real.total) * 100) : null
+      return { capitulo, asignatura, reportes, pctFalladoReal, enAmbosRankings: capitulosMasFalladosClaves.has(capitulo) }
+    })
+    .sort((a, b) => b.reportes - a.reportes)
+    .slice(0, 8)
+
+  // 10. Resolución de reportes, por asignatura (abiertos/en_progreso vs.
+  // resuelto/cerrado) — mismo criterio de "resuelto" que el widget 9 global.
+  const resolucionMap = new Map<string, { abiertos: number; resueltos: number }>()
+  for (const t of ticketsPregunta) {
+    const a = t.preguntaAsignatura ?? 'Sin asignatura'
+    const actual = resolucionMap.get(a) ?? { abiertos: 0, resueltos: 0 }
+    if (t.estado === 'resuelto' || t.estado === 'cerrado') actual.resueltos += 1
+    else actual.abiertos += 1
+    resolucionMap.set(a, actual)
+  }
+  const resolucionReportesPorAsignatura: ResolucionAsignatura[] = Array.from(resolucionMap.entries())
+    .map(([asignatura, { abiertos, resueltos }]) => ({
+      asignatura,
+      color: colorAsignatura(asignatura),
+      abiertos,
+      resueltos,
+      total: abiertos + resueltos,
+    }))
+    .sort((a, b) => b.total - a.total)
+
+  // 11. Preguntas ocultas, por asignatura — usa `curso_id` (no el texto
+  // `asignatura`) porque es el único campo con conteo exacto garantizado sin
+  // traer filas (ver comentario de ASIGNATURAS_ADMIN en lib/preguntas.ts);
+  // por eso los nombres acá son los "de curso" (ej. "Pacientes especiales"),
+  // levemente distintos del texto que usan los tickets/preguntas sueltas.
+  const conteosOcultas = await Promise.all(
+    ASIGNATURAS_ADMIN.map(async ({ cursoId, nombre }) => {
+      const ids = cursoIdsReales(cursoId)
+      const [{ count: total, error: errorTotal }, { count: ocultas, error: errorOcultas }] = await Promise.all([
+        supabase.from('preguntas').select('*', { count: 'exact', head: true }).in('curso_id', ids),
+        supabase.from('preguntas').select('*', { count: 'exact', head: true }).in('curso_id', ids).eq('oculta', true),
+      ])
+      if (errorTotal) console.error(`Error al contar preguntas de "${cursoId}":`, errorTotal.message)
+      if (errorOcultas) console.error(`Error al contar ocultas de "${cursoId}":`, errorOcultas.message)
+      return { cursoId, nombre, total: total ?? 0, ocultas: ocultas ?? 0 }
+    }),
+  )
+  const preguntasOcultasPorAsignatura: RankingItem[] = conteosOcultas
+    .filter((c) => c.total > 0)
+    .map((c) => ({
+      clave: c.cursoId,
+      nombre: c.nombre,
+      cantidad: c.ocultas,
+      pct: c.total > 0 ? Math.round((c.ocultas / c.total) * 1000) / 10 : 0,
+    }))
+    .sort((a, b) => b.pct - a.pct)
+
+  // ---- 12 y 13 (antes 7 y 8). Onboarding (tour) + embudo de activación. ----
   const registrados = usuarios.length
   const vioTour = usuarios.filter((u) => u.vioTourBienvenida).length
   const idsConIntento = new Set(filasIntentos.map((f) => f.user_id as string))
   const primerSimulacro = usuarios.filter((u) => idsConIntento.has(u.id)).length
 
-  // ---- 9. Soporte agregado. ----
+  // ---- 14. Soporte agregado (antes 9). ----
   const abiertos = tickets.filter((t) => t.estado === 'abierto' || t.estado === 'en_progreso').length
   const resueltos = tickets.filter((t) => t.estado === 'resuelto' || t.estado === 'cerrado').length
   const porMotivoMap = new Map<string, number>()
@@ -294,7 +456,7 @@ export async function obtenerEstadisticas(usuarios: Usuario[], tickets: Ticket[]
       ? Math.round((tiemposRespuestaHoras.reduce((a, b) => a + b, 0) / tiemposRespuestaHoras.length) * 10) / 10
       : null
 
-  // ---- 10. Alcance de los mensajes del admin. ----
+  // ---- 15. Alcance de los mensajes del admin (antes 10). ----
   const vistosPorMensaje = new Map<string, Set<string>>()
   for (const fila of filasDescartes) {
     const mid = fila.mensaje_id as string
@@ -313,7 +475,7 @@ export async function obtenerEstadisticas(usuarios: Usuario[], tickets: Ticket[]
     return { id: fila.id as string, tipo, resumen, audiencia, vistos, creadoEn: fila.creado_en as string }
   })
 
-  // ---- 11. Crecimiento: usuarios nuevos acumulados por semana (últimas 10). ----
+  // ---- 16. Crecimiento (antes 11): usuarios nuevos acumulados por semana (últimas 10). ----
   const semanas = 10
   const inicioSemana0 = new Date()
   inicioSemana0.setHours(0, 0, 0, 0)
@@ -340,6 +502,11 @@ export async function obtenerEstadisticas(usuarios: Usuario[], tickets: Ticket[]
     materias,
     tiempoAgotado: { pct: conTiempo > 0 ? Math.round((agotados / conTiempo) * 100) : 0, agotados, conTiempo },
     capitulosMasFallos,
+    reportesPorAsignatura,
+    preguntasMasReportadas,
+    capitulosReportadoVsFallado,
+    resolucionReportesPorAsignatura,
+    preguntasOcultasPorAsignatura,
     onboarding: { vieron: vioTour, total: registrados, pct: registrados > 0 ? Math.round((vioTour / registrados) * 100) : 0 },
     embudo: { registrados, vioTour, primerSimulacro },
     soporte: { abiertos, resueltos, promedioRespuestaHoras, porMotivo },

@@ -16,10 +16,32 @@ import {
   Image as ImageIcon,
   Video,
   FileText,
+  AlertTriangle,
+  Repeat,
+  Scale,
+  CheckCircle2,
+  EyeOff,
 } from 'lucide-react'
 import { obtenerEstadisticas, type EstadisticasApp, type PuntoSerie, type RankingItem } from '@/lib/estadisticas'
+import { colorAsignatura } from '@/lib/coloresAsignatura'
 import type { Usuario } from '@/lib/usuarios'
-import type { Ticket } from '@/lib/tickets'
+import type { Ticket, EstadoTicket } from '@/lib/tickets'
+
+// Etiqueta/estilo de estado de ticket, en miniatura — copia deliberada de los
+// mismos mapas privados de AtencionCliente.tsx (no se exportan desde ahí para
+// no acoplar las dos pantallas por un detalle visual tan chico).
+const ETIQUETA_ESTADO_MINI: Record<EstadoTicket, string> = {
+  abierto: 'Abierto',
+  en_progreso: 'En progreso',
+  resuelto: 'Resuelto',
+  cerrado: 'Cerrado',
+}
+const ESTILO_ESTADO_MINI: Record<EstadoTicket, string> = {
+  abierto: 'bg-info/12 text-info',
+  en_progreso: 'bg-accent/12 text-accent',
+  resuelto: 'bg-success/12 text-success',
+  cerrado: 'bg-muted text-muted-foreground',
+}
 
 const formatoFecha = new Intl.DateTimeFormat('es', { day: '2-digit', month: 'short' })
 function fmtDia(iso: string): string {
@@ -35,8 +57,10 @@ interface Props {
 
 /**
  * Pantalla "Estadísticas": uso e interacción de la app, agregado entre todos
- * los usuarios (ver claude/estadisticas-admin-diseno.md). Doce widgets
- * agrupados en 6 bloques, mismo orden y numeración que el mockup aprobado.
+ * los usuarios (ver claude/estadisticas-admin-diseno.md). 17 widgets
+ * agrupados en 7 bloques, mismo orden y numeración que el mockup aprobado
+ * (bloque "Reportes de errores", n.º 7-11, agregado 2026-09-13 — ver
+ * claude/atencion-cliente-diseno.md).
  * Todo el cálculo vive en lib/estadisticas.ts — este archivo solo pinta.
  */
 export function Estadisticas({ usuarios, cargandoUsuarios, tickets, cargandoTickets }: Props) {
@@ -159,9 +183,129 @@ export function Estadisticas({ usuarios, cargandoUsuarios, tickets, cargandoTick
             )}
           </Widget>
 
-          <Eyebrow icono={Compass} n={7} titulo="Onboarding" />
+          <Eyebrow icono={AlertTriangle} n={7} titulo="Reportes de errores" />
           <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2">
-            <Widget n={7} icono={Compass} titulo="Completaron el tour de bienvenida" sub="Sale de perfiles.vio_tour_bienvenida.">
+            <Widget n={7} icono={AlertTriangle} titulo="Asignaturas con más reportes" sub="Tickets con origen 'pregunta reportada', agrupados por pregunta_asignatura.">
+              {datos.reportesPorAsignatura.length === 0 ? (
+                <VacioMini texto="Todavía no hay preguntas reportadas." />
+              ) : (
+                <Ranking items={datos.reportesPorAsignatura} />
+              )}
+            </Widget>
+
+            <Widget n={8} icono={Repeat} titulo="Preguntas más reportadas" sub="Misma pregunta reportada más de una vez — revisar primero.">
+              {datos.preguntasMasReportadas.length === 0 ? (
+                <VacioMini texto="Ninguna pregunta fue reportada más de una vez." />
+              ) : (
+                <div className="overflow-hidden rounded-xl border border-border">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-border text-left text-[0.62rem] font-bold uppercase tracking-wide text-muted-foreground">
+                        <th className="px-2.5 py-1.5">N.º</th>
+                        <th className="px-2.5 py-1.5">Asignatura</th>
+                        <th className="px-2.5 py-1.5">Veces</th>
+                        <th className="px-2.5 py-1.5">Último estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {datos.preguntasMasReportadas.map((p) => (
+                        <tr key={`${p.asignatura}__${p.numero}`} className="border-b border-border last:border-0">
+                          <td className="px-2.5 py-1.5 font-mono text-muted-foreground">{p.numero}</td>
+                          <td className={`px-2.5 py-1.5 truncate font-bold ${colorAsignatura(p.asignatura).text}`}>{p.asignatura}</td>
+                          <td className="px-2.5 py-1.5 font-extrabold text-foreground">{p.veces}</td>
+                          <td className="px-2.5 py-1.5">
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${ESTILO_ESTADO_MINI[p.estado]}`}>
+                              {ETIQUETA_ESTADO_MINI[p.estado]}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Widget>
+          </div>
+
+          <Widget
+            n={9}
+            icono={Scale}
+            titulo="Reportado vs. fallado real, por capítulo"
+            sub="Cruza esta lista con el widget 6 (capítulos con más fallos reales) — coincidir en los dos es la señal más fuerte de una pregunta rota de verdad."
+            className="mt-3.5"
+          >
+            {datos.capitulosReportadoVsFallado.length === 0 ? (
+              <VacioMini texto="Todavía no hay capítulos reportados." />
+            ) : (
+              <div className="overflow-hidden rounded-xl border border-border">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border text-left text-[0.62rem] font-bold uppercase tracking-wide text-muted-foreground">
+                      <th className="px-2.5 py-1.5">Capítulo</th>
+                      <th className="px-2.5 py-1.5">Asignatura</th>
+                      <th className="px-2.5 py-1.5">Reportes</th>
+                      <th className="px-2.5 py-1.5">% fallado real</th>
+                      <th className="px-2.5 py-1.5" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {datos.capitulosReportadoVsFallado.map((c) => (
+                      <tr key={c.capitulo} className="border-b border-border last:border-0">
+                        <td className="px-2.5 py-1.5 font-bold text-foreground">{c.capitulo}</td>
+                        <td className={`px-2.5 py-1.5 truncate font-semibold ${colorAsignatura(c.asignatura).text}`}>{c.asignatura}</td>
+                        <td className="px-2.5 py-1.5 font-extrabold text-foreground">{c.reportes}</td>
+                        <td className="px-2.5 py-1.5 font-mono text-muted-foreground">{c.pctFalladoReal === null ? '—' : `${c.pctFalladoReal}%`}</td>
+                        <td className="px-2.5 py-1.5">
+                          {c.enAmbosRankings && (
+                            <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-destructive/14 px-2 py-0.5 text-[10px] font-extrabold text-destructive">
+                              <AlertTriangle className="h-2.5 w-2.5" /> en los dos rankings
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Widget>
+
+          <div className="mt-3.5 grid grid-cols-1 gap-3.5 md:grid-cols-2">
+            <Widget n={10} icono={CheckCircle2} titulo="Resolución de reportes, por asignatura" sub="De los reportes de cada materia, cuántos siguen abiertos vs. ya resueltos.">
+              {datos.resolucionReportesPorAsignatura.length === 0 ? (
+                <VacioMini texto="Todavía no hay reportes." />
+              ) : (
+                <div className="mt-1">
+                  {datos.resolucionReportesPorAsignatura.map((it) => (
+                    <div key={it.asignatura} className="mb-2.5 flex items-center gap-2 last:mb-0">
+                      <span className={`w-[104px] shrink-0 truncate text-[11.5px] font-semibold ${it.color.text}`} title={it.asignatura}>
+                        {it.asignatura}
+                      </span>
+                      <span className="flex h-3 flex-1 overflow-hidden rounded bg-muted">
+                        <span className="h-full bg-success" style={{ width: `${it.total > 0 ? (it.resueltos / it.total) * 100 : 0}%` }} />
+                        <span className="h-full bg-info" style={{ width: `${it.total > 0 ? (it.abiertos / it.total) * 100 : 0}%` }} />
+                      </span>
+                      <span className="w-14 shrink-0 text-right font-mono text-[10.5px] text-muted-foreground">
+                        {it.resueltos}/{it.total}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Widget>
+
+            <Widget n={11} icono={EyeOff} titulo="Preguntas ocultas, por asignatura" sub="preguntas.oculta = true — % sobre el total de esa materia, no cantidad cruda.">
+              {datos.preguntasOcultasPorAsignatura.length === 0 ? (
+                <VacioMini texto="Sin datos todavía." />
+              ) : (
+                <Ranking items={datos.preguntasOcultasPorAsignatura} />
+              )}
+            </Widget>
+          </div>
+
+          <Eyebrow icono={Compass} n={12} titulo="Onboarding" />
+          <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2">
+            <Widget n={12} icono={Compass} titulo="Completaron el tour de bienvenida" sub="Sale de perfiles.vio_tour_bienvenida.">
               <div className="mt-2 flex items-center gap-4">
                 <Donut pct={datos.onboarding.pct} />
                 <div>
@@ -173,7 +317,7 @@ export function Estadisticas({ usuarios, cargandoUsuarios, tickets, cargandoTick
               </div>
             </Widget>
 
-            <Widget n={8} icono={TrendingUp} titulo="Embudo de activación" sub="Registro → tour → primer simulacro.">
+            <Widget n={13} icono={TrendingUp} titulo="Embudo de activación" sub="Registro → tour → primer simulacro.">
               <div className="mt-1 space-y-2">
                 <Funnel etiqueta="Registrados" valor={datos.embudo.registrados} base={datos.embudo.registrados} />
                 <Funnel etiqueta="Vio el tour" valor={datos.embudo.vioTour} base={datos.embudo.registrados} />
@@ -182,9 +326,9 @@ export function Estadisticas({ usuarios, cargandoUsuarios, tickets, cargandoTick
             </Widget>
           </div>
 
-          <Eyebrow icono={LifeBuoy} n={9} titulo="Soporte y mensajes" />
+          <Eyebrow icono={LifeBuoy} n={14} titulo="Soporte y mensajes" />
           <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2">
-            <Widget n={9} icono={LifeBuoy} titulo="Panel de soporte agregado" sub="Sale de tickets / mensajes.">
+            <Widget n={14} icono={LifeBuoy} titulo="Panel de soporte agregado" sub="Sale de tickets / mensajes.">
               <div className="mt-1 grid grid-cols-3 gap-2.5">
                 <StatMini valor={datos.soporte.abiertos} etiqueta="Abiertos" />
                 <StatMini valor={datos.soporte.resueltos} etiqueta="Resueltos" />
@@ -201,7 +345,7 @@ export function Estadisticas({ usuarios, cargandoUsuarios, tickets, cargandoTick
               )}
             </Widget>
 
-            <Widget n={10} icono={Megaphone} titulo="Alcance de tus mensajes" sub="Sale de mensajes_admin_descartados.">
+            <Widget n={15} icono={Megaphone} titulo="Alcance de tus mensajes" sub="Sale de mensajes_admin_descartados.">
               {datos.alcanceMensajes.length === 0 ? (
                 <VacioMini texto="Todavía no mandaste ningún mensaje." />
               ) : (
@@ -230,12 +374,12 @@ export function Estadisticas({ usuarios, cargandoUsuarios, tickets, cargandoTick
             </Widget>
           </div>
 
-          <Eyebrow icono={TrendingUp} n={11} titulo="Crecimiento" />
-          <Widget n={11} icono={TrendingUp} titulo="Usuarios nuevos (acumulado)" sub="Últimas 10 semanas.">
+          <Eyebrow icono={TrendingUp} n={16} titulo="Crecimiento" />
+          <Widget n={16} icono={TrendingUp} titulo="Usuarios nuevos (acumulado)" sub="Últimas 10 semanas.">
             <SerieLinea puntos={datos.crecimiento} altura={110} />
           </Widget>
 
-          <Eyebrow icono={Wrench} n={12} titulo="Por instrumentar" />
+          <Eyebrow icono={Wrench} n={17} titulo="Por instrumentar" />
           <div className="flex items-center gap-3.5 rounded-2xl border border-dashed border-border p-5">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
               <Wrench className="h-[18px] w-[18px]" />
@@ -376,12 +520,12 @@ function Ranking({ items, danger = false }: { items: RankingItem[]; danger?: boo
     <div className="space-y-1">
       {items.map((it) => (
         <div key={it.clave} className="grid grid-cols-[110px_1fr_32px] items-center gap-2">
-          <span className="truncate text-[11.5px] font-semibold text-foreground" title={it.nombre}>
+          <span className={`truncate text-[11.5px] font-semibold ${it.color?.text ?? 'text-foreground'}`} title={it.nombre}>
             {it.nombre}
           </span>
           <span className="relative h-3.5 overflow-hidden rounded bg-muted">
             <span
-              className={`absolute inset-y-0 left-0 rounded ${danger ? 'bg-destructive' : 'bg-accent'}`}
+              className={`absolute inset-y-0 left-0 rounded ${it.color?.bg ?? (danger ? 'bg-destructive' : 'bg-accent')}`}
               style={{ width: `${Math.max(4, (it.pct / max) * 100)}%` }}
             />
           </span>
