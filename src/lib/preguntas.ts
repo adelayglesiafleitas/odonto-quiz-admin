@@ -51,7 +51,7 @@ function mapPregunta(fila: any): Pregunta {
   }
 }
 
-// Las 4 asignaturas reales de la app (mismo cursoId que usan lib/cursos.ts y
+// Las asignaturas reales de la app (mismo cursoId que usan lib/cursos.ts y
 // lib/data.ts del lado del cliente, mismos nombres que ve el alumno en
 // "¿Qué vas a examinar?" — ver lib/asignaturas.ts allá). Se fija esta lista
 // acá en vez de calcularla con un SELECT distinct: `asignatura` (el texto de
@@ -63,8 +63,18 @@ function mapPregunta(fila: any): Pregunta {
 // de 1000 filas por pedido, así que un SELECT sin acotar sobre 20 mil+ filas
 // podía perderse asignaturas enteras (el bug real que se vio: "2
 // Asignaturas" en vez de 4).
+//
+// `odontologia_libro` (307 preguntas, capítulos del libro de Inmaculada
+// Tomás) se cargó aislado de `odontologia` a propósito (ver
+// claude/pacientes-especiales-libro-capitulo-diseno.md) para no mezclarse
+// con el banco de examen normal — pero eso lo dejaba también invisible acá
+// en el admin, sin forma de revisarlo o corregirlo. Se agrega como una
+// entrada más para que la doctora pueda editarlo igual que el resto, aunque
+// el alumno todavía lo vea por separado (gateado por
+// `libro_pacientes_especiales_habilitado`).
 export const ASIGNATURAS_ADMIN: { cursoId: string; nombre: string }[] = [
   { cursoId: 'odontologia', nombre: 'Pacientes especiales' },
+  { cursoId: 'odontologia_libro', nombre: 'Pacientes especiales — Libro (Inmaculada Tomás)' },
   { cursoId: 'psicologia', nombre: 'Psicología' },
   { cursoId: 'ortodoncia', nombre: 'Ortodoncia' },
   { cursoId: 'materiales', nombre: 'Materiales Odontológicos' },

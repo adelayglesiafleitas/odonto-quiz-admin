@@ -29,26 +29,31 @@ const POR_PAGINA = 50
 const inputBase =
   'h-10 rounded-xl border border-border bg-card px-3 text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
 
-// Agrupa las preguntas de la página actual por capítulo consecutivo, para
-// mostrarlas divididas en secciones en vez de una lista plana — los bancos
-// se cargaron capítulo por capítulo, así que ordenadas por `numero` (como ya
-// las devuelve listarPreguntas) los capítulos salen contiguos casi siempre;
-// si uno queda partido entre dos páginas de 50, sigue viéndose bien, solo
-// aparece como dos secciones con el mismo nombre, una en cada página.
+// Agrupa las preguntas de la página actual por capítulo, para mostrarlas
+// divididas en secciones en vez de una lista plana. Ojo: NO asume que las
+// filas de un mismo capítulo vengan contiguas en `numero` — se probó así
+// (agrupando solo repeticiones consecutivas) y en la práctica el número se
+// intercala entre capítulos (1 de "Otros Exámenes", 1 de "Exámenes CRADO", 2
+// de "Otros Exámenes"...), así que ese enfoque partía cada capítulo en
+// decenas de secciones repetidas. Acá se arma un balde por nombre de
+// capítulo (con un Map para acordarse el orden de aparición) y se juntan
+// todas las filas de esa página que lo comparten, aparezcan donde aparezcan.
 interface GrupoCapitulo {
   capitulo: string
   filas: Pregunta[]
 }
 
 function agruparPorCapitulo(filas: Pregunta[]): GrupoCapitulo[] {
+  const indicePorCapitulo = new Map<string, number>()
   const grupos: GrupoCapitulo[] = []
   for (const fila of filas) {
     const capitulo = fila.capitulo ?? 'Sin capítulo'
-    const ultimo = grupos[grupos.length - 1]
-    if (ultimo && ultimo.capitulo === capitulo) {
-      ultimo.filas.push(fila)
-    } else {
+    const indice = indicePorCapitulo.get(capitulo)
+    if (indice === undefined) {
+      indicePorCapitulo.set(capitulo, grupos.length)
       grupos.push({ capitulo, filas: [fila] })
+    } else {
+      grupos[indice].filas.push(fila)
     }
   }
   return grupos
@@ -153,11 +158,11 @@ export function Preguntas() {
     if (ok) cargar()
   }
 
-  function alternarColapso(capitulo: string) {
+  function alternarColapso(nombreCapitulo: string) {
     setCapitulosColapsados((prev) => {
       const siguiente = new Set(prev)
-      if (siguiente.has(capitulo)) siguiente.delete(capitulo)
-      else siguiente.add(capitulo)
+      if (siguiente.has(nombreCapitulo)) siguiente.delete(nombreCapitulo)
+      else siguiente.add(nombreCapitulo)
       return siguiente
     })
   }
