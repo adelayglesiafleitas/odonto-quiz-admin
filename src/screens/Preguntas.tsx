@@ -1,5 +1,16 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Search, BookOpen, Loader2, ChevronLeft, ChevronRight, Eye, EyeOff, Trash2, AlertTriangle } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
+import {
+  Search,
+  BookOpen,
+  Loader2,
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+  Eye,
+  EyeOff,
+  Trash2,
+  AlertTriangle,
+} from 'lucide-react'
 import {
   listarPreguntas,
   listarAsignaturasConConteo,
@@ -17,6 +28,31 @@ const POR_PAGINA = 50
 
 const inputBase =
   'h-10 rounded-xl border border-border bg-card px-3 text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+
+// Agrupa las preguntas de la página actual por capítulo consecutivo, para
+// mostrarlas divididas en secciones en vez de una lista plana — los bancos
+// se cargaron capítulo por capítulo, así que ordenadas por `numero` (como ya
+// las devuelve listarPreguntas) los capítulos salen contiguos casi siempre;
+// si uno queda partido entre dos páginas de 50, sigue viéndose bien, solo
+// aparece como dos secciones con el mismo nombre, una en cada página.
+interface GrupoCapitulo {
+  capitulo: string
+  filas: Pregunta[]
+}
+
+function agruparPorCapitulo(filas: Pregunta[]): GrupoCapitulo[] {
+  const grupos: GrupoCapitulo[] = []
+  for (const fila of filas) {
+    const capitulo = fila.capitulo ?? 'Sin capítulo'
+    const ultimo = grupos[grupos.length - 1]
+    if (ultimo && ultimo.capitulo === capitulo) {
+      ultimo.filas.push(fila)
+    } else {
+      grupos.push({ capitulo, filas: [fila] })
+    }
+  }
+  return grupos
+}
 
 // Banco de preguntas: reemplaza los JSON estáticos (src/data/*.json en la
 // app del cliente) por la tabla `preguntas` de Supabase, editable acá sin
@@ -54,6 +90,9 @@ export function Preguntas() {
   const [preguntaAEliminar, setPreguntaAEliminar] = useState<Pregunta | null>(null)
   const [eliminando, setEliminando] = useState(false)
 
+  // Qué secciones de capítulo están colapsadas, por nombre de capítulo.
+  const [capitulosColapsados, setCapitulosColapsados] = useState<Set<string>>(new Set())
+
   useEffect(() => {
     listarAsignaturasConConteo().then((lista) => {
       setAsignaturas(lista)
@@ -63,6 +102,9 @@ export function Preguntas() {
   }, [])
 
   useEffect(() => {
+    // Al cambiar de asignatura, los nombres de capítulo ya no aplican —
+    // arrancar todas las secciones abiertas de nuevo.
+    setCapitulosColapsados(new Set())
     if (!cursoId) {
       setCapitulos([])
       return
@@ -109,6 +151,15 @@ export function Preguntas() {
   async function alOcultar(p: Pregunta) {
     const { ok } = await alternarOcultaPregunta(p.id, !p.oculta)
     if (ok) cargar()
+  }
+
+  function alternarColapso(capitulo: string) {
+    setCapitulosColapsados((prev) => {
+      const siguiente = new Set(prev)
+      if (siguiente.has(capitulo)) siguiente.delete(capitulo)
+      else siguiente.add(capitulo)
+      return siguiente
+    })
   }
 
   async function confirmarEliminar() {
@@ -187,7 +238,6 @@ export function Preguntas() {
               <tr className="border-b border-border text-left text-[0.7rem] font-bold uppercase tracking-wide text-muted-foreground">
                 <th className="whitespace-nowrap px-4 py-3">N.º</th>
                 <th className="whitespace-nowrap px-4 py-3">Pregunta</th>
-                <th className="whitespace-nowrap px-4 py-3">Capítulo</th>
                 <th className="whitespace-nowrap px-4 py-3">Opciones</th>
                 <th className="whitespace-nowrap px-4 py-3">Actualizada</th>
                 <th className="whitespace-nowrap px-4 py-3 text-right">Acciones</th>
@@ -196,13 +246,13 @@ export function Preguntas() {
             <tbody>
               {cargando ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={5} className="px-4 py-12 text-center text-muted-foreground">
                     <Loader2 className="mx-auto h-5 w-5 animate-spin" />
                   </td>
                 </tr>
               ) : preguntas.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                  <td colSpan={5} className="px-4 py-12 text-center text-sm text-muted-foreground">
                     <span className="flex flex-col items-center gap-2">
                       <BookOpen className="h-6 w-6 text-muted-foreground/60" />
                       Ninguna pregunta coincide con estos filtros.
@@ -210,75 +260,99 @@ export function Preguntas() {
                   </td>
                 </tr>
               ) : (
-                preguntas.map((p) => (
-                  <tr
-                    key={p.id}
-                    onClick={() => setPreguntaAbiertaId(p.id)}
-                    className={`cursor-pointer border-b border-border/70 text-sm last:border-b-0 hover:bg-muted/50 ${p.oculta ? 'opacity-60' : ''}`}
-                  >
-                    <td className="whitespace-nowrap px-4 py-3 font-mono text-muted-foreground">{p.numero}</td>
-                    <td className="max-w-[420px] px-4 py-3">
-                      <div className="flex items-center gap-1.5">
-                        {/* "Examen Práctico" es la etiqueta de caso clínico dentro de
-                            Pacientes Especiales y de Psicología — se marca acá solo
-                            como información, sin afectar el filtro principal (que
-                            ya separa por curso_id, no por este campo). */}
-                        {p.asignatura === 'Examen Práctico' && (
-                          <span className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent">
-                            Caso clínico
-                          </span>
-                        )}
-                        <span
-                          className={`line-clamp-1 font-semibold ${p.oculta ? 'text-muted-foreground line-through' : 'text-foreground'}`}
-                        >
-                          {p.pregunta}
-                        </span>
-                        {p.oculta && (
-                          <span className="shrink-0 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-600 dark:text-amber-400">
-                            Oculta
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">{p.capitulo ?? '—'}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">{p.opciones.length}</td>
-                    <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-muted-foreground">
-                      {p.actualizadoEn ? new Date(p.actualizadoEn).toLocaleDateString('es') : '—'}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            alOcultar(p)
-                          }}
-                          className={`flex h-7 w-7 items-center justify-center rounded-lg ${
-                            p.oculta
-                              ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                              : 'text-muted-foreground hover:bg-accent/10 hover:text-accent'
-                          }`}
-                          aria-label={p.oculta ? 'Mostrar pregunta' : 'Ocultar pregunta'}
-                          title={p.oculta ? 'Mostrar pregunta' : 'Ocultar pregunta'}
-                        >
-                          {p.oculta ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setPreguntaAEliminar(p)
-                          }}
-                          className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                          aria-label="Eliminar pregunta"
-                          title="Eliminar pregunta"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                agruparPorCapitulo(preguntas).map((grupo) => {
+                  const colapsado = capitulosColapsados.has(grupo.capitulo)
+                  return (
+                    <Fragment key={`${grupo.capitulo}-${grupo.filas[0].id}`}>
+                      <tr className="border-b border-border bg-muted/40">
+                        <td colSpan={5} className="px-4 py-2">
+                          <button
+                            type="button"
+                            onClick={() => alternarColapso(grupo.capitulo)}
+                            className="flex w-full items-center gap-2 text-left text-[0.7rem] font-bold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+                          >
+                            <ChevronDown
+                              className={`h-3.5 w-3.5 shrink-0 transition-transform ${colapsado ? '-rotate-90' : ''}`}
+                            />
+                            {grupo.capitulo}
+                            <span className="rounded-full bg-card px-2 py-0.5 font-mono text-[0.65rem] normal-case tracking-normal text-muted-foreground">
+                              {grupo.filas.length}
+                            </span>
+                          </button>
+                        </td>
+                      </tr>
+                      {!colapsado &&
+                        grupo.filas.map((p) => (
+                          <tr
+                            key={p.id}
+                            onClick={() => setPreguntaAbiertaId(p.id)}
+                            className={`cursor-pointer border-b border-border/70 text-sm last:border-b-0 hover:bg-muted/50 ${p.oculta ? 'opacity-60' : ''}`}
+                          >
+                            <td className="whitespace-nowrap px-4 py-3 font-mono text-muted-foreground">{p.numero}</td>
+                            <td className="max-w-[420px] px-4 py-3">
+                              <div className="flex items-center gap-1.5">
+                                {/* "Examen Práctico" es la etiqueta de caso clínico dentro de
+                                    Pacientes Especiales y de Psicología — se marca acá solo
+                                    como información, sin afectar el filtro principal (que
+                                    ya separa por curso_id, no por este campo). */}
+                                {p.asignatura === 'Examen Práctico' && (
+                                  <span className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-bold text-accent">
+                                    Caso clínico
+                                  </span>
+                                )}
+                                <span
+                                  className={`line-clamp-1 font-semibold ${p.oculta ? 'text-muted-foreground line-through' : 'text-foreground'}`}
+                                >
+                                  {p.pregunta}
+                                </span>
+                                {p.oculta && (
+                                  <span className="shrink-0 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                                    Oculta
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">{p.opciones.length}</td>
+                            <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-muted-foreground">
+                              {p.actualizadoEn ? new Date(p.actualizadoEn).toLocaleDateString('es') : '—'}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3">
+                              <div className="flex items-center justify-end gap-1">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    alOcultar(p)
+                                  }}
+                                  className={`flex h-7 w-7 items-center justify-center rounded-lg ${
+                                    p.oculta
+                                      ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                                      : 'text-muted-foreground hover:bg-accent/10 hover:text-accent'
+                                  }`}
+                                  aria-label={p.oculta ? 'Mostrar pregunta' : 'Ocultar pregunta'}
+                                  title={p.oculta ? 'Mostrar pregunta' : 'Ocultar pregunta'}
+                                >
+                                  {p.oculta ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setPreguntaAEliminar(p)
+                                  }}
+                                  className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                                  aria-label="Eliminar pregunta"
+                                  title="Eliminar pregunta"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                    </Fragment>
+                  )
+                })
               )}
             </tbody>
           </table>
