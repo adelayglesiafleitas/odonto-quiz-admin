@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Eye, EyeOff, Loader2, Pencil, TriangleAlert, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Check, Copy, Eye, EyeOff, Loader2, Pencil, TriangleAlert, X } from 'lucide-react'
 import {
   obtenerPregunta,
   buscarPreguntaPorAsignaturaYNumero,
@@ -40,6 +40,9 @@ export function EditarPreguntaModal({ preguntaId, asignatura, numero, onClose, o
   const [guardando, setGuardando] = useState(false)
   const [guardado, setGuardado] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [mostrarCopiar, setMostrarCopiar] = useState(false)
+  const [copiado, setCopiado] = useState(false)
+  const textoCopiaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     let cancelado = false
@@ -71,11 +74,13 @@ export function EditarPreguntaModal({ preguntaId, asignatura, numero, onClose, o
 
   useEffect(() => {
     function tecla(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
+      if (e.key !== 'Escape') return
+      if (mostrarCopiar) setMostrarCopiar(false)
+      else onClose()
     }
     document.addEventListener('keydown', tecla)
     return () => document.removeEventListener('keydown', tecla)
-  }, [onClose])
+  }, [onClose, mostrarCopiar])
 
   const avisos = original ? detectarAnomalias({ opciones }) : []
   const huboCambios =
@@ -87,6 +92,30 @@ export function EditarPreguntaModal({ preguntaId, asignatura, numero, onClose, o
 
   function marcarCorrecta(letra: string) {
     setOpciones((prev) => prev.map((o) => ({ ...o, correcta: o.letra === letra })))
+  }
+
+  // Texto plano listo para pegar en un ticket, WhatsApp, etc. Usa lo que se
+  // ve ahora mismo en el formulario (aunque tenga cambios sin guardar), no
+  // lo que quedó guardado en la base — es lo que la persona está mirando.
+  function textoPreguntaCompleta() {
+    const encabezado = original
+      ? `N.º ${original.numero} · ${original.asignatura}${original.capitulo ? ` · ${original.capitulo}` : ''}`
+      : ''
+    const lineasOpciones = opciones.map((o) => `${o.letra}) ${o.texto}${o.correcta ? '  ← correcta' : ''}`).join('\n')
+    return [encabezado, '', enunciado, '', lineasOpciones].join('\n')
+  }
+
+  async function copiarTexto() {
+    const texto = textoPreguntaCompleta()
+    try {
+      await navigator.clipboard.writeText(texto)
+      setCopiado(true)
+      setTimeout(() => setCopiado(false), 2000)
+    } catch {
+      // Sin permiso de portapapeles (poco común, pero pasa en algunos
+      // navegadores/config): el texto sigue visible y seleccionable a mano.
+      textoCopiaRef.current?.select()
+    }
   }
 
   // Igual que el botón del ojo en Preguntas.tsx: reversible y sin
@@ -132,7 +161,7 @@ export function EditarPreguntaModal({ preguntaId, asignatura, numero, onClose, o
         role="dialog"
         aria-modal="true"
         aria-labelledby="editar-pregunta-titulo"
-        className="flex max-h-[88vh] w-full max-w-2xl animate-float-up flex-col overflow-hidden rounded-[20px] border border-border bg-card shadow-xl"
+        className="relative flex max-h-[88vh] w-full max-w-2xl animate-float-up flex-col overflow-hidden rounded-[20px] border border-border bg-card shadow-xl"
       >
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border p-5">
           <div className="min-w-0">
@@ -146,15 +175,77 @@ export function EditarPreguntaModal({ preguntaId, asignatura, numero, onClose, o
               </p>
             )}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Cerrar"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition hover:bg-muted hover:text-foreground"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {original && (
+              <button
+                type="button"
+                onClick={() => setMostrarCopiar(true)}
+                aria-label="Copiar pregunta y respuesta"
+                title="Copiar pregunta y respuesta"
+                className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent/10 text-accent transition hover:bg-accent/20"
+              >
+                <Copy className="h-4 w-4" />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Cerrar"
+              className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
+
+        {mostrarCopiar && original && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center rounded-[20px] bg-black/70 p-5 backdrop-blur-sm">
+            <div className="w-full max-w-lg rounded-2xl border border-border bg-card shadow-xl">
+              <div className="flex items-center justify-between gap-3 border-b border-border p-4">
+                <p className="flex items-center gap-2 text-sm font-extrabold text-foreground">
+                  <Copy className="h-3.5 w-3.5 text-accent" />
+                  Copiar pregunta
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setMostrarCopiar(false)}
+                  aria-label="Cerrar"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="p-4">
+                <textarea
+                  ref={textoCopiaRef}
+                  readOnly
+                  value={textoPreguntaCompleta()}
+                  rows={8}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="w-full resize-none rounded-xl border border-border bg-muted/40 p-3.5 font-mono text-xs leading-relaxed text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-3 p-4 pt-0">
+                <span
+                  className={`flex items-center gap-1.5 text-xs font-bold text-accent transition-opacity ${
+                    copiado ? 'opacity-100' : 'opacity-0'
+                  }`}
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  Copiado
+                </span>
+                <button
+                  type="button"
+                  onClick={copiarTexto}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-accent px-4 py-2 text-sm font-bold text-accent-foreground transition hover:bg-accent/90"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  Copiar todo
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-5">
           {cargando ? (
