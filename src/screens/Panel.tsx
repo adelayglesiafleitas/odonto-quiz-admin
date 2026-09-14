@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AdminSidebar, NAV, type Vista } from '@/components/AdminSidebar'
 import { NotificacionesCampana } from '@/components/NotificacionesCampana'
+import type { RolAdmin } from '@/lib/admin'
 import { listarUsuarios, type Usuario } from '@/lib/usuarios'
 import { listarTodosTickets, contarNoLeidos, suscribirseATickets, type Ticket } from '@/lib/tickets'
 import { Usuarios } from './Usuarios'
@@ -9,8 +10,16 @@ import { Mensajes } from './Mensajes'
 import { Estadisticas } from './Estadisticas'
 import { Preguntas } from './Preguntas'
 
-export function Panel({ correo, userId }: { correo: string; userId: string }) {
-  const [vista, setVista] = useState<Vista>('usuarios')
+export function Panel({ correo, userId, rol }: { correo: string; userId: string; rol: RolAdmin }) {
+  const esSubadmin = rol === 'subadmin'
+  const [vista, setVista] = useState<Vista>(esSubadmin ? 'atencion' : 'usuarios')
+  // Un subadmin solo tiene una pantalla — esto no es solo "ocultar el botón":
+  // aunque `vista` cambiara por algún otro medio, acá se vuelve a fijar en
+  // 'atencion' antes de decidir qué se renderiza. La defensa real está en la
+  // base (RLS por tipo de admin), esto es nomás para que la UI nunca muestre
+  // algo que después la base le va a rechazar.
+  const vistaEfectiva: Vista = esSubadmin ? 'atencion' : vista
+  const navSidebar = useMemo(() => (esSubadmin ? NAV.filter((n) => n.target === 'atencion') : NAV), [esSubadmin])
 
   const [usuarios, setUsuarios] = useState<Usuario[]>([])
   const [cargandoUsuarios, setCargandoUsuarios] = useState(true)
@@ -49,20 +58,27 @@ export function Panel({ correo, userId }: { correo: string; userId: string }) {
     document.title = pendientes > 0 ? `(${pendientes}) ExamPrep · Panel admin` : 'ExamPrep · Panel admin'
   }, [pendientes])
 
-  const tituloVista = NAV.find((n) => n.target === vista)?.label ?? ''
+  const tituloVista = NAV.find((n) => n.target === vistaEfectiva)?.label ?? ''
 
   return (
     <div className="flex min-h-screen flex-col bg-background md:flex-row">
-      <AdminSidebar vista={vista} onCambiarVista={setVista} correo={correo} pendientes={pendientes} />
+      <AdminSidebar
+        vista={vistaEfectiva}
+        onCambiarVista={setVista}
+        correo={correo}
+        pendientes={pendientes}
+        nav={navSidebar}
+        rol={rol}
+      />
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-border bg-card/60 px-5 py-3.5 md:px-9">
           <p className="text-[0.95rem] font-extrabold text-foreground">{tituloVista}</p>
           <NotificacionesCampana tickets={tickets} correosPorId={correosPorId} onVerTodas={() => setVista('atencion')} />
         </header>
         <main className="min-w-0 flex-1 px-5 py-6 md:px-9 md:py-9">
-          {vista === 'usuarios' ? (
+          {vistaEfectiva === 'usuarios' ? (
             <Usuarios usuarios={usuarios} cargando={cargandoUsuarios} miPropioId={userId} onRecargar={recargarUsuarios} />
-          ) : vista === 'atencion' ? (
+          ) : vistaEfectiva === 'atencion' ? (
             <AtencionCliente
               tickets={tickets}
               cargando={cargandoTickets}
@@ -70,9 +86,9 @@ export function Panel({ correo, userId }: { correo: string; userId: string }) {
               adminId={userId}
               onRecargar={recargarTickets}
             />
-          ) : vista === 'preguntas' ? (
+          ) : vistaEfectiva === 'preguntas' ? (
             <Preguntas />
-          ) : vista === 'mensajes' ? (
+          ) : vistaEfectiva === 'mensajes' ? (
             <Mensajes usuarios={usuarios} cargandoUsuarios={cargandoUsuarios} />
           ) : (
             <Estadisticas

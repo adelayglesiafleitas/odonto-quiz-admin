@@ -9,6 +9,13 @@ interface Props {
   onCambiarVista: (vista: Vista) => void
   correo: string
   pendientes: number
+  // Ítems a mostrar. Default: todos (rol admin). Un subadmin recibe un
+  // arreglo filtrado a un solo ítem (ver Panel.tsx) — no hay pantalla oculta
+  // "por las dudas", directamente no se renderiza el botón.
+  nav?: typeof NAV
+  // Se muestra como tag bajo el correo, en el pie. Solo para subadmin — un
+  // admin completo es el caso esperado/default, no hace falta señalarlo.
+  rol?: 'admin' | 'subadmin'
 }
 
 export const NAV: { target: Vista; label: string; icon: typeof Users }[] = [
@@ -19,7 +26,7 @@ export const NAV: { target: Vista; label: string; icon: typeof Users }[] = [
   { target: 'estadisticas', label: 'Estadísticas', icon: BarChart3 },
 ]
 
-export function AdminSidebar({ vista, onCambiarVista, correo, pendientes }: Props) {
+export function AdminSidebar({ vista, onCambiarVista, correo, pendientes, nav = NAV, rol }: Props) {
   const inicial = correo.charAt(0).toUpperCase() || '?'
 
   return (
@@ -34,7 +41,7 @@ export function AdminSidebar({ vista, onCambiarVista, correo, pendientes }: Prop
       </div>
 
       <nav className="flex flex-1 flex-row gap-1 md:flex-none md:flex-col">
-        {NAV.map(({ target, label, icon: Icon }) => {
+        {nav.map(({ target, label, icon: Icon }) => {
           const activo = vista === target
           return (
             <button
@@ -78,10 +85,15 @@ export function AdminSidebar({ vista, onCambiarVista, correo, pendientes }: Prop
           </span>
           <div className="min-w-0 flex-1">
             <p className="truncate text-xs font-semibold text-foreground">{correo}</p>
+            {rol === 'subadmin' && (
+              <span className="mt-0.5 inline-block rounded-full bg-accent/15 px-1.5 py-px text-[0.63rem] font-extrabold uppercase tracking-wide text-accent">
+                Subadmin
+              </span>
+            )}
             <button
               type="button"
               onClick={() => supabase.auth.signOut()}
-              className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive"
+              className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive"
             >
               <LogOut className="h-3 w-3" />
               Cerrar sesión

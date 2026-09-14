@@ -74,10 +74,14 @@ export function PanelEstadisticasUsuario({ usuario, onClose }: Props) {
               <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
                 <span
                   className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
-                    usuario.esAdmin ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
+                    usuario.rolAdmin === 'admin'
+                      ? 'bg-primary/10 text-primary'
+                      : usuario.rolAdmin === 'subadmin'
+                        ? 'bg-accent/15 text-accent'
+                        : 'bg-muted text-muted-foreground'
                   }`}
                 >
-                  {usuario.esAdmin ? 'Admin' : 'Usuario'}
+                  {usuario.rolAdmin === 'admin' ? 'Admin' : usuario.rolAdmin === 'subadmin' ? 'Subadmin' : 'Usuario'}
                 </span>
                 <span>Alta {fechaCorta(usuario.creadoEn)}</span>
                 {usuario.ultimoAcceso && (

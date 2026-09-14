@@ -8,6 +8,7 @@ import {
   EllipsisVertical,
   KeyRound,
   Shield,
+  Headset,
   Trash2,
   Info,
   Eye,
@@ -22,7 +23,7 @@ import { PanelEstadisticasUsuario } from '@/components/PanelEstadisticasUsuario'
 import { getCookie, setCookie } from '@/lib/cookies'
 import {
   emailPareceSospechoso,
-  otorgarAdmin,
+  asignarRolAdmin,
   revocarAdmin,
   restablecerContrasena,
   eliminarUsuario,
@@ -31,7 +32,7 @@ import {
   type Usuario,
 } from '@/lib/usuarios'
 
-type FiltroRol = 'todos' | 'admin' | 'user'
+type FiltroRol = 'todos' | 'admin' | 'subadmin' | 'user'
 type FiltroActividad = 'todos' | 'con' | 'sin'
 
 const formatoFecha = new Intl.DateTimeFormat('es', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -71,6 +72,7 @@ interface Props {
 // color que el pill de Admin), info para lo que es solo un aviso/envío.
 type TipoConfirmacion =
   | 'otorgar'
+  | 'hacerSubadmin'
   | 'quitar'
   | 'reset'
   | 'eliminar'
@@ -101,30 +103,46 @@ function configPara(confirmacion: Confirmacion): ConfigConfirmacion {
       return {
         variant: 'accent',
         icono: Shield,
-        titulo: '¿Dar permisos de administrador?',
+        titulo: usuario.rolAdmin === 'subadmin' ? '¿Ascender a administrador completo?' : '¿Dar permisos de administrador?',
         descripcion: (
           <>
             <strong className="font-mono font-semibold text-foreground">{usuario.email}</strong> va a poder ver y gestionar todo el
-            panel — usuarios, pagos y soporte, igual que vos.
+            panel — usuarios, preguntas, mensajes, estadísticas y soporte, igual que vos.
           </>
         ),
-        nota: 'Podés revertirlo cuando quieras desde este mismo menú.',
+        nota: 'Podés cambiarle el rol o quitárselo cuando quieras desde este mismo menú.',
         botonLabel: 'Dar admin',
+        botonCargando: 'Guardando…',
+      }
+    case 'hacerSubadmin':
+      return {
+        variant: 'accent',
+        icono: Headset,
+        titulo: usuario.rolAdmin === 'admin' ? '¿Bajar a subadmin?' : '¿Dar acceso de subadmin?',
+        descripcion: (
+          <>
+            <strong className="font-mono font-semibold text-foreground">{usuario.email}</strong> va a poder entrar al panel, pero
+            solo va a ver <strong className="text-foreground">Atención al cliente</strong> — nada de Usuarios, Preguntas, Mensajes
+            ni Estadísticas.
+          </>
+        ),
+        nota: 'No puede tocar el rol de nadie, ni el suyo ni el de otro admin — esa pantalla no existe para este nivel, ni siquiera llamando directo a la base.',
+        botonLabel: 'Dar subadmin',
         botonCargando: 'Guardando…',
       }
     case 'quitar':
       return {
         variant: 'accent',
         icono: Shield,
-        titulo: '¿Quitar permisos de administrador?',
+        titulo: '¿Quitar el acceso de administración?',
         descripcion: (
           <>
             <strong className="font-mono font-semibold text-foreground">{usuario.email}</strong> deja de tener acceso al panel de
             administración de inmediato.
           </>
         ),
-        nota: 'Podés revertirlo cuando quieras desde este mismo menú.',
-        botonLabel: 'Quitar admin',
+        nota: 'Podés volver a dárselo cuando quieras desde este mismo menú.',
+        botonLabel: 'Quitar acceso',
         botonCargando: 'Guardando…',
       }
     case 'marcarTourVisto':
@@ -296,7 +314,8 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
     setProcesandoId(usuario.id)
 
     let resultado: { ok: boolean }
-    if (tipo === 'otorgar') resultado = await otorgarAdmin(usuario.id)
+    if (tipo === 'otorgar') resultado = await asignarRolAdmin(usuario.id, 'admin')
+    else if (tipo === 'hacerSubadmin') resultado = await asignarRolAdmin(usuario.id, 'subadmin')
     else if (tipo === 'quitar') resultado = await revocarAdmin(usuario.id)
     else if (tipo === 'reset') resultado = await restablecerContrasena(usuario.email)
     else if (tipo === 'marcarTourVisto') resultado = await marcarTourBienvenida(usuario.id, true)
@@ -314,6 +333,7 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
     } else {
       const mensajes: Record<TipoConfirmacion, string> = {
         otorgar: 'No se pudo actualizar el rol. Probá de nuevo en un momento.',
+        hacerSubadmin: 'No se pudo actualizar el rol. Probá de nuevo en un momento.',
         quitar: 'No se pudo actualizar el rol. Probá de nuevo en un momento.',
         reset: 'No se pudo enviar el enlace de restablecimiento. Probá de nuevo en un momento.',
         eliminar: 'No se pudo eliminar el usuario. Probá de nuevo en un momento.',
@@ -332,7 +352,7 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
       total: usuarios.length,
       simulacros: usuarios.reduce((acc, u) => acc + u.simulacros, 0),
       nuevos: usuarios.filter((u) => new Date(u.creadoEn).getTime() >= haceUnaSemana).length,
-      admins: usuarios.filter((u) => u.esAdmin).length,
+      admins: usuarios.filter((u) => u.rolAdmin === 'admin').length,
     }
   }, [usuarios])
 
@@ -340,7 +360,9 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
     const q = busqueda.trim().toLowerCase()
     return usuarios.filter((u) => {
       const coincideTexto = !q || u.email.toLowerCase().includes(q) || (u.nickname ?? '').toLowerCase().includes(q)
-      const coincideRol = rol === 'todos' || (rol === 'admin' ? u.esAdmin : !u.esAdmin)
+      const coincideRol =
+        rol === 'todos' ||
+        (rol === 'admin' ? u.rolAdmin === 'admin' : rol === 'subadmin' ? u.rolAdmin === 'subadmin' : u.rolAdmin === 'usuario')
       const coincideActividad = actividad === 'todos' || (actividad === 'con' ? u.simulacros > 0 : u.simulacros === 0)
       return coincideTexto && coincideRol && coincideActividad
     })
@@ -395,6 +417,7 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
         <select value={rol} onChange={(e) => setRol(e.target.value as FiltroRol)} className={inputBase}>
           <option value="todos">Todos los roles</option>
           <option value="admin">Solo admins</option>
+          <option value="subadmin">Solo subadmins</option>
           <option value="user">Solo usuarios</option>
         </select>
         <select value={actividad} onChange={(e) => setActividad(e.target.value as FiltroActividad)} className={inputBase}>
@@ -518,7 +541,7 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
                       <AcademiaBadge habilitada={u.academiaHabilitada} />
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">
-                      <RolBadge esAdmin={u.esAdmin} />
+                      <RolBadge rolAdmin={u.rolAdmin} />
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-right">
                       {procesandoId === u.id ? (
@@ -593,16 +616,37 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
             etiqueta="Restablecer contraseña"
             onClick={() => pedirConfirmacion('reset', usuarioMenu)}
           />
-          {usuarioMenu.esAdmin ? (
-            <MenuItem
-              icono={Shield}
-              etiqueta="Quitar admin"
-              disabled={usuarioMenu.id === miPropioId}
-              titulo={usuarioMenu.id === miPropioId ? 'No podés quitarte el rol de admin a vos mismo' : undefined}
-              onClick={() => pedirConfirmacion('quitar', usuarioMenu)}
-            />
+          {usuarioMenu.rolAdmin === 'admin' ? (
+            <>
+              <MenuItem
+                icono={Headset}
+                etiqueta="Hacer subadmin"
+                disabled={usuarioMenu.id === miPropioId}
+                titulo={usuarioMenu.id === miPropioId ? 'No podés bajarte el rol a vos mismo' : undefined}
+                onClick={() => pedirConfirmacion('hacerSubadmin', usuarioMenu)}
+              />
+              <MenuItem
+                icono={Shield}
+                etiqueta="Quitar acceso admin"
+                disabled={usuarioMenu.id === miPropioId}
+                titulo={usuarioMenu.id === miPropioId ? 'No podés quitarte el acceso a vos mismo' : undefined}
+                onClick={() => pedirConfirmacion('quitar', usuarioMenu)}
+              />
+            </>
+          ) : usuarioMenu.rolAdmin === 'subadmin' ? (
+            <>
+              <MenuItem icono={Shield} etiqueta="Hacer admin" onClick={() => pedirConfirmacion('otorgar', usuarioMenu)} />
+              <MenuItem
+                icono={Shield}
+                etiqueta="Quitar acceso admin"
+                onClick={() => pedirConfirmacion('quitar', usuarioMenu)}
+              />
+            </>
           ) : (
-            <MenuItem icono={Shield} etiqueta="Hacer admin" onClick={() => pedirConfirmacion('otorgar', usuarioMenu)} />
+            <>
+              <MenuItem icono={Shield} etiqueta="Hacer admin" onClick={() => pedirConfirmacion('otorgar', usuarioMenu)} />
+              <MenuItem icono={Headset} etiqueta="Hacer subadmin" onClick={() => pedirConfirmacion('hacerSubadmin', usuarioMenu)} />
+            </>
           )}
           {usuarioMenu.vioTourBienvenida ? (
             <MenuItem
@@ -660,12 +704,11 @@ function StatCard({ etiqueta, valor, cargando }: { etiqueta: string; valor: numb
   )
 }
 
-function RolBadge({ esAdmin }: { esAdmin: boolean }) {
-  return esAdmin ? (
-    <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary">Admin</span>
-  ) : (
-    <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold text-muted-foreground">Usuario</span>
-  )
+function RolBadge({ rolAdmin }: { rolAdmin: Usuario['rolAdmin'] }) {
+  if (rolAdmin === 'admin') return <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary">Admin</span>
+  if (rolAdmin === 'subadmin')
+    return <span className="rounded-full bg-accent/15 px-2.5 py-0.5 text-xs font-bold text-accent">Subadmin</span>
+  return <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-bold text-muted-foreground">Usuario</span>
 }
 
 // Mismo criterio visual que RolBadge (accent = lo que vale la pena notar,

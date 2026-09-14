@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import type { RolAdmin } from './admin'
 
 export interface Usuario {
   id: string
@@ -6,7 +7,7 @@ export interface Usuario {
   nickname: string | null
   creadoEn: string
   ultimoAcceso: string | null
-  esAdmin: boolean
+  rolAdmin: RolAdmin | 'usuario'
   simulacros: number
   promedio: number | null
   vioTourBienvenida: boolean
@@ -22,10 +23,14 @@ interface FilaRpc {
 }
 
 // admin_listar_usuarios() ya hace su propio chequeo de `admins` adentro
-// (raise exception si auth.uid() no es admin) — ver migración
-// endurecer_rls_y_funciones. Acá se combina con `admins` (rol) y
-// `historial_intentos` (actividad), que sí son legibles directo por RLS
-// para un admin ("Ver historial propio o si es admin").
+// (raise exception si auth.uid() no tiene fila ahí — admin o subadmin, ver
+// migración admin_eliminar_usuario) — ver migración endurecer_rls_y_funciones.
+// Acá se combina con `admins` (rol) y `historial_intentos` (actividad), que sí
+// son legibles directo por RLS para un admin ("Ver historial propio o si es
+// admin"). Nota: un subadmin que llame a esto (para resolver el correo del
+// dueño de un ticket en Atención al cliente) solo ve su propia fila de
+// `admins` por RLS — no le importa, `rolAdmin` no se usa fuera de la pantalla
+// de Usuarios, que un subadmin nunca llega a ver.
 export async function listarUsuarios(): Promise<Usuario[]> {
   const [
     { data: filas, error: errorUsuarios },
@@ -34,7 +39,7 @@ export async function listarUsuarios(): Promise<Usuario[]> {
     { data: perfiles, error: errorPerfiles },
   ] = await Promise.all([
     supabase.rpc('admin_listar_usuarios'),
-    supabase.from('admins').select('user_id'),
+    supabase.from('admins').select('user_id, tipo'),
     supabase.from('historial_intentos').select('user_id, porcentaje'),
     supabase.from('perfiles').select('user_id, vio_tour_bienvenida, academia_habilitada'),
   ])
@@ -50,7 +55,7 @@ export async function listarUsuarios(): Promise<Usuario[]> {
   // visto' / 'No habilitada'.
   if (errorPerfiles) console.error('Error al leer perfiles (tour de bienvenida / acceso a Academia):', errorPerfiles.message)
 
-  const idsAdmin = new Set((admins ?? []).map((fila) => fila.user_id as string))
+  const rolPorUsuario = new Map<string, RolAdmin>((admins ?? []).map((fila) => [fila.user_id as string, fila.tipo as RolAdmin]))
   const tourVistoPorUsuario = new Map<string, boolean>(
     (perfiles ?? []).map((fila) => [fila.user_id as string, Boolean(fila.vio_tour_bienvenida)]),
   )
@@ -75,7 +80,7 @@ export async function listarUsuarios(): Promise<Usuario[]> {
       nickname: fila.nickname,
       creadoEn: fila.creado_en,
       ultimoAcceso: fila.ultimo_acceso,
-      esAdmin: idsAdmin.has(fila.user_id),
+      rolAdmin: rolPorUsuario.get(fila.user_id) ?? 'usuario',
       simulacros: resumen?.simulacros ?? 0,
       promedio: resumen && resumen.simulacros > 0 ? Math.round(resumen.sumaPorcentaje / resumen.simulacros) : null,
       vioTourBienvenida: tourVistoPorUsuario.get(fila.user_id) ?? false,
@@ -84,33 +89,37 @@ export async function listarUsuarios(): Promise<Usuario[]> {
   })
 }
 
-// RLS ("Solo admins agregan/quitan admins") ya exige que quien ejecuta esto
-// sea admin — ver migración admins_pueden_gestionar_admins. Sin esas
-// políticas estos dos insert/delete simplemente fallarían silenciosamente
-// (RLS deniega por defecto).
-export async function otorgarAdmin(userId: string): Promise<{ ok: boolean }> {
-  const { error } = await supabase.from('admins').insert({ user_id: userId })
-  // 23505 = ya existe la fila (por ejemplo, la lista de usuarios estaba
-  // desactualizada y ya era admin) — el estado que se buscaba ya es el
-  // real, así que no tiene sentido tratarlo como un error.
-  if (error && error.code !== '23505') {
-    console.error('Error al otorgar admin:', error.message)
+// RLS ("Solo admins agregan admins" / "Solo admins cambian el tipo de un
+// admin") ya exige que quien ejecuta esto sea un admin completo — ver
+// migraciones admins_pueden_gestionar_admins y agregar_rol_subadmin. El
+// upsert cubre las cuatro transiciones con una sola llamada: Usuario→Admin y
+// Usuario→Subadmin insertan la fila; Admin→Subadmin y Subadmin→Admin
+// actualizan el `tipo` de la fila que ya existía. Si el objetivo es la propia
+// cuenta de quien llama, la policy de UPDATE lo bloquea a propósito (no
+// podés bajarte el rol a vos mismo) — la UI además deshabilita esa opción en
+// el menú para no depender solo de eso.
+export async function asignarRolAdmin(userId: string, tipo: RolAdmin): Promise<{ ok: boolean }> {
+  const { error } = await supabase.from('admins').upsert({ user_id: userId, tipo }, { onConflict: 'user_id' })
+  if (error) {
+    console.error('Error al asignar el rol de admin:', error.message)
     return { ok: false }
   }
   return { ok: true }
 }
 
+// Quita todo acceso admin (sea nivel admin o subadmin) — vuelve a ser un
+// usuario normal.
 export async function revocarAdmin(userId: string): Promise<{ ok: boolean }> {
   const { error } = await supabase.from('admins').delete().eq('user_id', userId)
   if (error) {
-    console.error('Error al quitar admin:', error.message)
+    console.error('Error al quitar el acceso de administración:', error.message)
     return { ok: false }
   }
   return { ok: true }
 }
 
-// A diferencia de `otorgarAdmin`/`revocarAdmin` (que siempre escriben sobre
-// una fila que ya existe en `admins`), acá casi nunca hay fila previa en
+// A diferencia de `revocarAdmin` (que siempre borra una fila que ya existe en
+// `admins`), acá casi nunca hay fila previa en
 // `perfiles` — la tabla es nueva y sin backfill, así que la mayoría de los
 // usuarios todavía no tienen una. Por eso es upsert (mismo patrón que usa el
 // cliente en tourBienvenidaRemoto.ts): si no existe, la crea; si existe, la

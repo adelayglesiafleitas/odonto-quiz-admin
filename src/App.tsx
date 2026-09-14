@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
-import { esAdmin } from '@/lib/admin'
+import { obtenerRolAdmin, type RolAdmin } from '@/lib/admin'
 import { Login } from '@/screens/Login'
 import { NoAutorizado } from '@/screens/NoAutorizado'
 import { Panel } from '@/screens/Panel'
 
-type EstadoAdmin = 'verificando' | 'admin' | 'no-admin'
+type EstadoAdmin = 'verificando' | RolAdmin | 'no-admin'
 //cambio  kk
 function Cargando() {
   return (
@@ -46,8 +46,8 @@ function App() {
     }
     let cancelado = false
     setEstadoAdmin('verificando')
-    esAdmin(userId).then((ok) => {
-      if (!cancelado) setEstadoAdmin(ok ? 'admin' : 'no-admin')
+    obtenerRolAdmin(userId).then((rol) => {
+      if (!cancelado) setEstadoAdmin(rol ?? 'no-admin')
     })
     return () => {
       cancelado = true
@@ -58,7 +58,7 @@ function App() {
   if (!session) return <Login />
   if (estadoAdmin === 'verificando') return <Cargando />
   if (estadoAdmin === 'no-admin') return <NoAutorizado />
-  return <Panel correo={correo} userId={session.user.id} />
+  return <Panel correo={correo} userId={session.user.id} rol={estadoAdmin} />
 }
 
 export default App
