@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { PanelEstadisticasUsuario } from '@/components/PanelEstadisticasUsuario'
+import { ThOrdenable, cambiarOrden, type EstadoOrden } from '@/components/ThOrdenable'
 import { getCookie, setCookie } from '@/lib/cookies'
 import {
   emailPareceSospechoso,
@@ -34,6 +35,61 @@ import {
 
 type FiltroRol = 'todos' | 'admin' | 'subadmin' | 'user'
 type FiltroActividad = 'todos' | 'con' | 'sin'
+
+// Columnas ordenables de la tabla (todas menos la de acciones). 'n' es el
+// número de fila — ordenar por ahí simplemente invierte el orden actual,
+// no tiene un valor propio guardado en ningún lado.
+type ColOrdenUsuarios =
+  | 'n'
+  | 'email'
+  | 'creadoEn'
+  | 'ultimoAcceso'
+  | 'simulacros'
+  | 'promedio'
+  | 'vioTourBienvenida'
+  | 'academiaHabilitada'
+  | 'rolAdmin'
+
+// Para ordenar por "Rol": el más privilegiado primero al ordenar ascendente.
+const ORDEN_ROL: Record<Usuario['rolAdmin'], number> = { admin: 0, subadmin: 1, usuario: 2 }
+
+function ordenarUsuarios(lista: Usuario[], orden: EstadoOrden<ColOrdenUsuarios>): Usuario[] {
+  if (!orden.col) return lista
+  const mult = orden.dir === 'asc' ? 1 : -1
+  if (orden.col === 'n') {
+    // No hay un valor de "n" propio — es la posición en la lista actual,
+    // así que ordenar por acá solo invierte el orden que ya está aplicado.
+    return orden.dir === 'asc' ? lista : [...lista].reverse()
+  }
+  const col = orden.col
+  const copia = [...lista]
+  copia.sort((a, b) => {
+    switch (col) {
+      case 'creadoEn':
+      case 'ultimoAcceso': {
+        const da = a[col] ? new Date(a[col] as string).getTime() : -Infinity
+        const db = b[col] ? new Date(b[col] as string).getTime() : -Infinity
+        return (da - db) * mult
+      }
+      case 'simulacros':
+        return (a.simulacros - b.simulacros) * mult
+      case 'promedio': {
+        const pa = a.promedio ?? -Infinity
+        const pb = b.promedio ?? -Infinity
+        return (pa - pb) * mult
+      }
+      case 'vioTourBienvenida':
+      case 'academiaHabilitada':
+        return (Number(a[col]) - Number(b[col])) * mult
+      case 'rolAdmin':
+        return (ORDEN_ROL[a.rolAdmin] - ORDEN_ROL[b.rolAdmin]) * mult
+      case 'email':
+      default:
+        return a.email.localeCompare(b.email, 'es') * mult
+    }
+  })
+  return copia
+}
 
 const formatoFecha = new Intl.DateTimeFormat('es', { day: '2-digit', month: 'short', year: 'numeric' })
 function fmt(fecha: string | null): string {
@@ -244,6 +300,7 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
   const [actividad, setActividad] = useState<FiltroActividad>('todos')
   const [porPagina, setPorPagina] = useState<TamanoPagina>(getTamanoPaginaGuardado)
   const [pagina, setPagina] = useState(0)
+  const [orden, setOrden] = useState<EstadoOrden<ColOrdenUsuarios>>({ col: null, dir: 'asc' })
 
   const [procesandoId, setProcesandoId] = useState<string | null>(null)
   const [errorAccion, setErrorAccion] = useState<string | null>(null)
@@ -358,7 +415,7 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
 
   const filtrados = useMemo(() => {
     const q = busqueda.trim().toLowerCase()
-    return usuarios.filter((u) => {
+    const base = usuarios.filter((u) => {
       const coincideTexto = !q || u.email.toLowerCase().includes(q) || (u.nickname ?? '').toLowerCase().includes(q)
       const coincideRol =
         rol === 'todos' ||
@@ -366,7 +423,8 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
       const coincideActividad = actividad === 'todos' || (actividad === 'con' ? u.simulacros > 0 : u.simulacros === 0)
       return coincideTexto && coincideRol && coincideActividad
     })
-  }, [usuarios, busqueda, rol, actividad])
+    return ordenarUsuarios(base, orden)
+  }, [usuarios, busqueda, rol, actividad, orden])
 
   const hayFiltros = busqueda.trim() !== '' || rol !== 'todos' || actividad !== 'todos'
   const usuarioMenu = menuAbiertoId ? usuarios.find((u) => u.id === menuAbiertoId) ?? null : null
@@ -376,7 +434,7 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
   // ya usa el paginado de Preguntas.tsx).
   useEffect(() => {
     setPagina(0)
-  }, [busqueda, rol, actividad, porPagina])
+  }, [busqueda, rol, actividad, porPagina, orden])
 
   function cambiarPorPagina(valor: TamanoPagina) {
     setPorPagina(valor)
@@ -471,15 +529,30 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
           <table className="w-full min-w-[780px] border-collapse">
             <thead>
               <tr className="border-b border-border text-left text-[0.7rem] font-bold uppercase tracking-wide text-muted-foreground">
-                <th className="whitespace-nowrap px-4 py-3 text-right">#</th>
-                <th className="whitespace-nowrap px-4 py-3">Usuario</th>
-                <th className="whitespace-nowrap px-4 py-3">Alta</th>
-                <th className="whitespace-nowrap px-4 py-3">Último acceso</th>
-                <th className="whitespace-nowrap px-4 py-3">Simulacros</th>
-                <th className="whitespace-nowrap px-4 py-3">Promedio</th>
-                <th className="whitespace-nowrap px-4 py-3">Tour</th>
-                <th className="whitespace-nowrap px-4 py-3">Academia</th>
-                <th className="whitespace-nowrap px-4 py-3">Rol</th>
+                <ThOrdenable col="n" activo={orden} label="#" align="right" onOrdenar={(c) => setOrden((prev) => cambiarOrden(prev, c))} />
+                <ThOrdenable col="email" activo={orden} label="Usuario" onOrdenar={(c) => setOrden((prev) => cambiarOrden(prev, c))} />
+                <ThOrdenable col="creadoEn" activo={orden} label="Alta" onOrdenar={(c) => setOrden((prev) => cambiarOrden(prev, c))} />
+                <ThOrdenable
+                  col="ultimoAcceso"
+                  activo={orden}
+                  label="Último acceso"
+                  onOrdenar={(c) => setOrden((prev) => cambiarOrden(prev, c))}
+                />
+                <ThOrdenable col="simulacros" activo={orden} label="Simulacros" onOrdenar={(c) => setOrden((prev) => cambiarOrden(prev, c))} />
+                <ThOrdenable col="promedio" activo={orden} label="Promedio" onOrdenar={(c) => setOrden((prev) => cambiarOrden(prev, c))} />
+                <ThOrdenable
+                  col="vioTourBienvenida"
+                  activo={orden}
+                  label="Tour"
+                  onOrdenar={(c) => setOrden((prev) => cambiarOrden(prev, c))}
+                />
+                <ThOrdenable
+                  col="academiaHabilitada"
+                  activo={orden}
+                  label="Academia"
+                  onOrdenar={(c) => setOrden((prev) => cambiarOrden(prev, c))}
+                />
+                <ThOrdenable col="rolAdmin" activo={orden} label="Rol" onOrdenar={(c) => setOrden((prev) => cambiarOrden(prev, c))} />
                 <th className="whitespace-nowrap px-4 py-3 text-right">
                   <span className="sr-only">Acciones</span>
                 </th>

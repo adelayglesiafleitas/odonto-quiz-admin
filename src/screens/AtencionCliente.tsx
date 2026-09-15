@@ -22,6 +22,7 @@ import {
   type PlantillaRespuesta,
 } from '@/lib/plantillasRespuesta'
 import { EditarPreguntaModal } from '@/components/EditarPreguntaModal'
+import { ThOrdenable, cambiarOrden, type EstadoOrden } from '@/components/ThOrdenable'
 import { colorAsignatura } from '@/lib/coloresAsignatura'
 
 interface Props {
@@ -46,7 +47,8 @@ const ESTILO_ESTADO: Record<EstadoTicket, string> = {
   cerrado: 'bg-muted text-muted-foreground',
 }
 
-// Para "Orden: por estado" — agrupa abierto < en_progreso < resuelto < cerrado.
+// Para ordenar por columna "Estado" — agrupa abierto < en_progreso < resuelto < cerrado
+// (no alfabético: es el orden real del flujo de un ticket).
 const ORDEN_ESTADO: Record<EstadoTicket, number> = {
   abierto: 0,
   en_progreso: 1,
@@ -61,6 +63,45 @@ const ETIQUETA_ORIGEN: Record<OrigenTicket, string> = {
   otro: 'Otro',
 }
 
+// Columnas ordenables de la tabla (todas menos la de "abrir chat"). Antes
+// había un selector aparte de "Orden: recientes/antiguos/por estado" — se
+// reemplazó por esto: clic en "Actividad" o "Estado" hace lo mismo, con
+// menos controles en la barra de filtros. Ver claude/atencion-cliente-diseno.md.
+type ColOrdenTickets = 'usuario' | 'asunto' | 'origen' | 'asignatura' | 'estado' | 'procesadoPor' | 'ultimaActividadEn'
+
+function ordenarTickets(lista: Ticket[], orden: EstadoOrden<ColOrdenTickets>, correosPorId: Map<string, string>): Ticket[] {
+  if (!orden.col) return lista
+  const mult = orden.dir === 'asc' ? 1 : -1
+  const col = orden.col
+  const copia = [...lista]
+  copia.sort((a, b) => {
+    switch (col) {
+      case 'ultimaActividadEn':
+        return (new Date(a.ultimaActividadEn).getTime() - new Date(b.ultimaActividadEn).getTime()) * mult
+      case 'estado':
+        return (ORDEN_ESTADO[a.estado] - ORDEN_ESTADO[b.estado]) * mult
+      case 'usuario': {
+        const ea = correosPorId.get(a.usuarioId) ?? ''
+        const eb = correosPorId.get(b.usuarioId) ?? ''
+        return ea.localeCompare(eb, 'es') * mult
+      }
+      case 'procesadoPor': {
+        const pa = a.ultimoProcesadoPor ? correosPorId.get(a.ultimoProcesadoPor) ?? '' : ''
+        const pb = b.ultimoProcesadoPor ? correosPorId.get(b.ultimoProcesadoPor) ?? '' : ''
+        return pa.localeCompare(pb, 'es') * mult
+      }
+      case 'asignatura':
+        return (a.preguntaAsignatura ?? '').localeCompare(b.preguntaAsignatura ?? '', 'es') * mult
+      case 'origen':
+        return ETIQUETA_ORIGEN[a.origen].localeCompare(ETIQUETA_ORIGEN[b.origen], 'es') * mult
+      case 'asunto':
+      default:
+        return a.asunto.localeCompare(b.asunto, 'es') * mult
+    }
+  })
+  return copia
+}
+
 const inputBase =
   'h-10 rounded-xl border border-border bg-card px-3 text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
 
@@ -73,7 +114,10 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
   const [busqueda, setBusqueda] = useState('')
   const [filtroEstado, setFiltroEstado] = useState<'todos' | EstadoTicket>('todos')
   const [filtroOrigen, setFiltroOrigen] = useState<'todos' | OrigenTicket>('todos')
-  const [orden, setOrden] = useState<'reciente' | 'antiguo' | 'estado'>('reciente')
+  // Por defecto ordenado por Actividad descendente — es el mismo orden que
+  // ya trae `listarTodosTickets()` (más recientes primero), así que arranca
+  // mostrando esa columna como la activa en vez de "sin ordenar".
+  const [orden, setOrden] = useState<EstadoOrden<ColOrdenTickets>>({ col: 'ultimaActividadEn', dir: 'desc' })
   const [ticketAbiertoId, setTicketAbiertoId] = useState<string | null>(null)
   const [confirmandoId, setConfirmandoId] = useState<string | null>(null)
   const [plantillas, setPlantillas] = useState<PlantillaRespuesta[]>([])
@@ -108,15 +152,7 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
       .filter((t) => !q || (correosPorId.get(t.usuarioId) ?? '').toLowerCase().includes(q) || t.asunto.toLowerCase().includes(q))
       .filter((t) => filtroEstado === 'todos' || t.estado === filtroEstado)
       .filter((t) => filtroOrigen === 'todos' || t.origen === filtroOrigen)
-    // 'reciente' no ordena de nuevo: `tickets` ya viene de
-    // listarTodosTickets() ordenado por ultima_actividad_en desc.
-    if (orden === 'antiguo') {
-      return [...base].sort((a, b) => new Date(a.ultimaActividadEn).getTime() - new Date(b.ultimaActividadEn).getTime())
-    }
-    if (orden === 'estado') {
-      return [...base].sort((a, b) => ORDEN_ESTADO[a.estado] - ORDEN_ESTADO[b.estado])
-    }
-    return base
+    return ordenarTickets(base, orden, correosPorId)
   }, [tickets, busqueda, filtroEstado, filtroOrigen, orden, correosPorId])
 
   const hayFiltros = busqueda.trim() !== '' || filtroEstado !== 'todos' || filtroOrigen !== 'todos'
@@ -171,11 +207,6 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
           <option value="pagos">Pagos</option>
           <option value="otro">Otro</option>
         </select>
-        <select value={orden} onChange={(e) => setOrden(e.target.value as typeof orden)} className={inputBase}>
-          <option value="reciente">Orden: recientes primero</option>
-          <option value="antiguo">Orden: antiguos primero</option>
-          <option value="estado">Orden: por estado</option>
-        </select>
         {hayFiltros && (
           <button
             type="button"
@@ -204,13 +235,23 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
           <table className="w-full min-w-[1040px] border-collapse">
             <thead>
               <tr className="border-b border-border text-left text-[0.7rem] font-bold uppercase tracking-wide text-muted-foreground">
-                <th className="whitespace-nowrap px-4 py-3">Usuario</th>
-                <th className="whitespace-nowrap px-4 py-3">Asunto</th>
-                <th className="whitespace-nowrap px-4 py-3">Origen</th>
-                <th className="whitespace-nowrap px-4 py-3">Asignatura</th>
-                <th className="whitespace-nowrap px-4 py-3">Estado</th>
-                <th className="whitespace-nowrap px-4 py-3">Procesado por</th>
-                <th className="whitespace-nowrap px-4 py-3">Actividad</th>
+                <ThOrdenable col="usuario" activo={orden} label="Usuario" onOrdenar={(c) => setOrden((prev) => cambiarOrden(prev, c))} />
+                <ThOrdenable col="asunto" activo={orden} label="Asunto" onOrdenar={(c) => setOrden((prev) => cambiarOrden(prev, c))} />
+                <ThOrdenable col="origen" activo={orden} label="Origen" onOrdenar={(c) => setOrden((prev) => cambiarOrden(prev, c))} />
+                <ThOrdenable col="asignatura" activo={orden} label="Asignatura" onOrdenar={(c) => setOrden((prev) => cambiarOrden(prev, c))} />
+                <ThOrdenable col="estado" activo={orden} label="Estado" onOrdenar={(c) => setOrden((prev) => cambiarOrden(prev, c))} />
+                <ThOrdenable
+                  col="procesadoPor"
+                  activo={orden}
+                  label="Procesado por"
+                  onOrdenar={(c) => setOrden((prev) => cambiarOrden(prev, c))}
+                />
+                <ThOrdenable
+                  col="ultimaActividadEn"
+                  activo={orden}
+                  label="Actividad"
+                  onOrdenar={(c) => setOrden((prev) => cambiarOrden(prev, c))}
+                />
                 <th className="whitespace-nowrap px-4 py-3">
                   <span className="sr-only">Abrir</span>
                 </th>
