@@ -1,7 +1,32 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { X, Loader2, Inbox } from 'lucide-react'
-import { obtenerHistorialUsuario, agregarTemas, type Intento, type TemaResumen } from '@/lib/historial'
+import {
+  obtenerHistorialUsuario,
+  agregarTemas,
+  agregarAsignaturas,
+  type Intento,
+  type TemaResumen,
+  type AsignaturaResumen,
+} from '@/lib/historial'
 import type { Usuario } from '@/lib/usuarios'
+import { COLOR_ASIGNATURA_DEFAULT, type ColorAsignatura } from '@/lib/coloresAsignatura'
+
+// Color por cursoId, no por el string de `preguntas.asignatura` — a
+// propósito NO se reusa colorAsignatura() de lib/coloresAsignatura.ts acá:
+// esa función busca por el texto exacto de la asignatura de cada pregunta
+// ("Pacientes Especiales", "Psicología general"), que no coincide en
+// mayúsculas/redacción con los nombres de curso de ASIGNATURAS_ADMIN
+// ("Pacientes especiales", "Psicología") usados en este panel — agrupar acá
+// es por curso_id, que no tiene ese problema. Mismos colores que ya usa el
+// resto del admin para cada asignatura (Ortodoncia = violeta, y "pink-400"
+// es el mismo reservado para Materiales Odontológicos, ver
+// COLOR_ASIGNATURA_RESERVA).
+const COLOR_POR_CURSO: Record<string, ColorAsignatura> = {
+  odontologia: { text: 'text-accent', bg: 'bg-accent' },
+  psicologia: { text: 'text-amber-400', bg: 'bg-amber-400' },
+  ortodoncia: { text: 'text-violet-400', bg: 'bg-violet-400' },
+  materiales: { text: 'text-pink-400', bg: 'bg-pink-400' },
+}
 
 const formatoFechaCorta = new Intl.DateTimeFormat('es', { day: '2-digit', month: 'short' })
 const formatoFechaHora = new Intl.DateTimeFormat('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -51,6 +76,7 @@ export function PanelEstadisticasUsuario({ usuario, onClose }: Props) {
   const promedio = n ? Math.round(intentos!.reduce((acc, it) => acc + it.porcentaje, 0) / n) : null
   const aprobados = intentos?.filter((it) => it.aprobado).length ?? 0
   const temas = intentos ? agregarTemas(intentos) : []
+  const asignaturas = intentos ? agregarAsignaturas(intentos) : []
   const recientes = intentos ? [...intentos].reverse().slice(0, 8) : []
 
   return (
@@ -125,6 +151,21 @@ export function PanelEstadisticasUsuario({ usuario, onClose }: Props) {
                 <Kpi etiqueta="Última actividad" valor={fechaCorta(intentos![n - 1].fecha)} chico />
               </div>
 
+              {asignaturas.length > 0 && (
+                <div className="rounded-2xl border border-border bg-card p-4">
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs font-bold text-foreground">Asignaturas</p>
+                    <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[11px] font-bold text-accent">{asignaturas.length}</span>
+                  </div>
+                  <p className="mb-2 text-[11px] text-muted-foreground">Simulacros y rendimiento por asignatura</p>
+                  <div className="flex flex-col gap-2">
+                    {asignaturas.map((a) => (
+                      <FilaAsignatura key={a.cursoId} asignatura={a} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="rounded-2xl border border-border bg-card p-4">
                 <p className="text-xs font-bold text-foreground">Evolución del puntaje</p>
                 <p className="mb-3 text-[11px] text-muted-foreground">
@@ -173,6 +214,22 @@ function Kpi({ etiqueta, valor, chico }: { etiqueta: string; valor: string; chic
     <div className="rounded-xl border border-border bg-card px-3 py-2.5">
       <div className={`font-mono font-extrabold text-foreground ${chico ? 'text-sm' : 'text-xl'}`}>{valor}</div>
       <div className="mt-0.5 text-[11px] font-semibold leading-snug text-muted-foreground">{etiqueta}</div>
+    </div>
+  )
+}
+
+function FilaAsignatura({ asignatura: a }: { asignatura: AsignaturaResumen }) {
+  const color = COLOR_POR_CURSO[a.cursoId] ?? COLOR_ASIGNATURA_DEFAULT
+  return (
+    <div className="flex items-center gap-3 rounded-xl bg-background px-3 py-2.5">
+      <span className={`h-2 w-2 shrink-0 rounded-full ${color.bg}`} />
+      <div className="min-w-0 flex-1">
+        <p className={`truncate text-[13px] font-bold ${color.text}`}>{a.nombre}</p>
+        <p className="text-[11px] text-muted-foreground">
+          {a.n} simulacros · {a.aprobados}/{a.n} aprobados · Última: {fechaCorta(a.ultimaFecha)}
+        </p>
+      </div>
+      <span className="shrink-0 font-mono text-sm font-extrabold text-foreground">{a.promedio}%</span>
     </div>
   )
 }

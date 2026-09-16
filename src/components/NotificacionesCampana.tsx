@@ -15,14 +15,12 @@ const ETIQUETA_ESTADO: Record<EstadoTicket, string> = {
   abierto: 'Abierto',
   en_progreso: 'En progreso',
   resuelto: 'Resuelto',
-  cerrado: 'Cerrado',
 }
 
 const ESTILO_ESTADO: Record<EstadoTicket, string> = {
   abierto: 'bg-info/12 text-info',
   en_progreso: 'bg-accent/12 text-accent',
   resuelto: 'bg-success/12 text-success',
-  cerrado: 'bg-muted text-muted-foreground',
 }
 
 interface Props {

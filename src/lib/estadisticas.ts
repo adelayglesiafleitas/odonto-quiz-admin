@@ -362,12 +362,12 @@ export async function obtenerEstadisticas(usuarios: Usuario[], tickets: Ticket[]
     .slice(0, 8)
 
   // 10. Resolución de reportes, por asignatura (abiertos/en_progreso vs.
-  // resuelto/cerrado) — mismo criterio de "resuelto" que el widget 9 global.
+  // resuelto) — mismo criterio de "resuelto" que el widget 9 global.
   const resolucionMap = new Map<string, { abiertos: number; resueltos: number }>()
   for (const t of ticketsPregunta) {
     const a = t.preguntaAsignatura ?? 'Sin asignatura'
     const actual = resolucionMap.get(a) ?? { abiertos: 0, resueltos: 0 }
-    if (t.estado === 'resuelto' || t.estado === 'cerrado') actual.resueltos += 1
+    if (t.estado === 'resuelto') actual.resueltos += 1
     else actual.abiertos += 1
     resolucionMap.set(a, actual)
   }
@@ -416,7 +416,7 @@ export async function obtenerEstadisticas(usuarios: Usuario[], tickets: Ticket[]
 
   // ---- 14. Soporte agregado (antes 9). ----
   const abiertos = tickets.filter((t) => t.estado === 'abierto' || t.estado === 'en_progreso').length
-  const resueltos = tickets.filter((t) => t.estado === 'resuelto' || t.estado === 'cerrado').length
+  const resueltos = tickets.filter((t) => t.estado === 'resuelto').length
   const porMotivoMap = new Map<string, number>()
   for (const t of tickets) {
     porMotivoMap.set(t.origen, (porMotivoMap.get(t.origen) ?? 0) + 1)

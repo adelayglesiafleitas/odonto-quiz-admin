@@ -4,7 +4,7 @@ import { supabase } from './supabase'
 // unidireccional de `feedback` (lib/feedbackAdmin.ts, que queda sin usar).
 // Ver claude/atencion-cliente-diseno.md en el proyecto de Claude.
 
-export type EstadoTicket = 'abierto' | 'en_progreso' | 'resuelto' | 'cerrado'
+export type EstadoTicket = 'abierto' | 'en_progreso' | 'resuelto'
 export type OrigenTicket = 'pregunta' | 'cuenta' | 'pagos' | 'otro'
 
 export interface Ticket {

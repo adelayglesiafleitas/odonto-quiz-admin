@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { ASIGNATURAS_ADMIN, cursoIdsReales } from './preguntas'
 
 export interface Intento {
   fecha: string
@@ -10,6 +11,10 @@ export interface Intento {
   tiempoUsadoSeg: number
   agotoTiempo: boolean
   desgloseCapitulos: Record<string, { total: number; correctas: number }> | null
+  // null en intentos viejos, de antes de que existiera la columna (mismo
+  // caso que desgloseCapitulos más arriba) — se ignoran al agrupar por
+  // asignatura en agregarAsignaturas, no rompen el resto del historial.
+  cursoId: string | null
 }
 
 interface FilaHistorial {
@@ -22,6 +27,7 @@ interface FilaHistorial {
   tiempo_usado_seg: number
   agoto_tiempo: boolean
   desglose_capitulos: Record<string, { total: number; correctas: number }> | null
+  curso_id: string | null
 }
 
 // RLS ("Ver historial propio o si es admin", tabla historial_intentos) ya
@@ -34,7 +40,7 @@ interface FilaHistorial {
 export async function obtenerHistorialUsuario(userId: string): Promise<Intento[]> {
   const { data, error } = await supabase
     .from('historial_intentos')
-    .select('fecha, total_preguntas, correctas, porcentaje, aprobado, capitulos, tiempo_usado_seg, agoto_tiempo, desglose_capitulos')
+    .select('fecha, total_preguntas, correctas, porcentaje, aprobado, capitulos, tiempo_usado_seg, agoto_tiempo, desglose_capitulos, curso_id')
     .eq('user_id', userId)
     .order('fecha', { ascending: true })
 
@@ -53,6 +59,7 @@ export async function obtenerHistorialUsuario(userId: string): Promise<Intento[]
     tiempoUsadoSeg: fila.tiempo_usado_seg,
     agotoTiempo: fila.agoto_tiempo,
     desgloseCapitulos: fila.desglose_capitulos,
+    cursoId: fila.curso_id,
   }))
 }
 
@@ -89,4 +96,52 @@ export function agregarTemas(intentos: Intento[], minPreguntas = 5): TemaResumen
     }))
     .filter((t) => t.total >= minPreguntas)
     .sort((a, b) => a.pct - b.pct)
+}
+
+export interface AsignaturaResumen {
+  cursoId: string
+  nombre: string
+  n: number
+  aprobados: number
+  promedio: number
+  ultimaFecha: string
+}
+
+// curso_id real (tal como se guarda en historial_intentos) -> cursoId
+// canónico de ASIGNATURAS_ADMIN. Reusa cursoIdsReales en vez de duplicar el
+// mapeo a mano: hoy solo pliega `odontologia_libro` adentro de `odontologia`
+// (ver claude/pacientes-especiales-libro-capitulo-diseno.md), pero si se
+// agrega otro curso_id "alias" en el futuro, esto lo sigue automáticamente.
+const CURSO_ID_A_CANONICO = new Map<string, string>(
+  ASIGNATURAS_ADMIN.flatMap(({ cursoId }) => cursoIdsReales(cursoId).map((real) => [real, cursoId] as const)),
+)
+
+// Agrupa los intentos por asignatura para el panel de un usuario puntual —
+// "¿qué está haciendo?", no solo "cuánto hizo en total". Solo devuelve
+// asignaturas con al menos un intento (nada de listar en cero las que el
+// usuario nunca tocó), en el mismo orden fijo que ASIGNATURAS_ADMIN.
+export function agregarAsignaturas(intentos: Intento[]): AsignaturaResumen[] {
+  const acumulado = new Map<string, { n: number; aprobados: number; sumaPorcentaje: number; ultimaFecha: string }>()
+  for (const intento of intentos) {
+    if (!intento.cursoId) continue
+    const cursoId = CURSO_ID_A_CANONICO.get(intento.cursoId) ?? intento.cursoId
+    const cur = acumulado.get(cursoId) ?? { n: 0, aprobados: 0, sumaPorcentaje: 0, ultimaFecha: intento.fecha }
+    cur.n += 1
+    if (intento.aprobado) cur.aprobados += 1
+    cur.sumaPorcentaje += intento.porcentaje
+    if (intento.fecha > cur.ultimaFecha) cur.ultimaFecha = intento.fecha
+    acumulado.set(cursoId, cur)
+  }
+
+  return ASIGNATURAS_ADMIN.filter((a) => acumulado.has(a.cursoId)).map((a) => {
+    const v = acumulado.get(a.cursoId)!
+    return {
+      cursoId: a.cursoId,
+      nombre: a.nombre,
+      n: v.n,
+      aprobados: v.aprobados,
+      promedio: Math.round(v.sumaPorcentaje / v.n),
+      ultimaFecha: v.ultimaFecha,
+    }
+  })
 }

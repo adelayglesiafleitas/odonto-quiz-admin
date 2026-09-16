@@ -24,6 +24,7 @@ import {
 import { EditarPreguntaModal } from '@/components/EditarPreguntaModal'
 import { ThOrdenable, cambiarOrden, type EstadoOrden } from '@/components/ThOrdenable'
 import { colorAsignatura } from '@/lib/coloresAsignatura'
+import { getCookie, setCookie } from '@/lib/cookies'
 
 interface Props {
   tickets: Ticket[]
@@ -37,23 +38,43 @@ const ETIQUETA_ESTADO: Record<EstadoTicket, string> = {
   abierto: 'Abierto',
   en_progreso: 'En progreso',
   resuelto: 'Resuelto',
-  cerrado: 'Cerrado',
 }
 
 const ESTILO_ESTADO: Record<EstadoTicket, string> = {
   abierto: 'bg-info/12 text-info',
   en_progreso: 'bg-accent/12 text-accent',
   resuelto: 'bg-success/12 text-success',
-  cerrado: 'bg-muted text-muted-foreground',
 }
 
-// Para ordenar por columna "Estado" — agrupa abierto < en_progreso < resuelto < cerrado
+// Color del puntito del popover de "Estado" (checkboxes para ocultar) — mismo
+// color que ya representa a cada estado en ESTILO_ESTADO, pero como fondo
+// sólido en vez de fondo suave + texto.
+const COLOR_PUNTO_ESTADO: Record<EstadoTicket, string> = {
+  abierto: 'bg-info',
+  en_progreso: 'bg-accent',
+  resuelto: 'bg-success',
+}
+
+const TODOS_LOS_ESTADOS: EstadoTicket[] = ['abierto', 'en_progreso', 'resuelto']
+
+// Qué estados están ocultos de la bandeja — guardado en cookie para que se
+// recuerde la próxima vez que se abre esta pantalla. Ver
+// claude/filtro-estado-tickets-diseno.md.
+const ESTADOS_OCULTOS_COOKIE = 'examprep_admin_tickets_estados_ocultos'
+
+function getEstadosOcultosGuardados(): Set<EstadoTicket> {
+  const valor = getCookie(ESTADOS_OCULTOS_COOKIE)
+  if (!valor) return new Set()
+  const validos = new Set<string>(TODOS_LOS_ESTADOS)
+  return new Set(valor.split(',').filter((v) => validos.has(v)) as EstadoTicket[])
+}
+
+// Para ordenar por columna "Estado" — agrupa abierto < en_progreso < resuelto
 // (no alfabético: es el orden real del flujo de un ticket).
 const ORDEN_ESTADO: Record<EstadoTicket, number> = {
   abierto: 0,
   en_progreso: 1,
   resuelto: 2,
-  cerrado: 3,
 }
 
 const ETIQUETA_ORIGEN: Record<OrigenTicket, string> = {
@@ -112,7 +133,9 @@ const inputBase =
 // claude/atencion-cliente-diseno.md.
 export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRecargar }: Props) {
   const [busqueda, setBusqueda] = useState('')
-  const [filtroEstado, setFiltroEstado] = useState<'todos' | EstadoTicket>('todos')
+  const [estadosOcultos, setEstadosOcultos] = useState<Set<EstadoTicket>>(() => getEstadosOcultosGuardados())
+  const [estadoAbierto, setEstadoAbierto] = useState(false)
+  const estadoRef = useRef<HTMLDivElement>(null)
   const [filtroOrigen, setFiltroOrigen] = useState<'todos' | OrigenTicket>('todos')
   // Por defecto ordenado por Actividad descendente — es el mismo orden que
   // ya trae `listarTodosTickets()` (más recientes primero), así que arranca
@@ -125,6 +148,25 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
   useEffect(() => {
     listarPlantillas().then(setPlantillas)
   }, [])
+
+  useEffect(() => {
+    if (!estadoAbierto) return
+    function onClickAfuera(e: MouseEvent) {
+      if (estadoRef.current && !estadoRef.current.contains(e.target as Node)) setEstadoAbierto(false)
+    }
+    document.addEventListener('mousedown', onClickAfuera)
+    return () => document.removeEventListener('mousedown', onClickAfuera)
+  }, [estadoAbierto])
+
+  function alternarEstadoOculto(estado: EstadoTicket) {
+    setEstadosOcultos((prev) => {
+      const next = new Set(prev)
+      if (next.has(estado)) next.delete(estado)
+      else next.add(estado)
+      setCookie(ESTADOS_OCULTOS_COOKIE, Array.from(next).join(','))
+      return next
+    })
+  }
 
   async function crearPlantillaHandler(titulo: string, cuerpo: string, categoria: OrigenTicket | null) {
     const { ok, plantilla } = await crearPlantilla(titulo, cuerpo, categoria, adminId)
@@ -140,22 +182,29 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
     () => ({
       total: tickets.length,
       abiertos: tickets.filter((t) => t.estado === 'abierto').length,
+      enProgreso: tickets.filter((t) => t.estado === 'en_progreso').length,
       sinLeer: contarNoLeidos(tickets),
       resueltos: tickets.filter((t) => t.estado === 'resuelto').length,
     }),
     [tickets],
   )
 
+  const conteoPorEstado: Record<EstadoTicket, number> = {
+    abierto: stats.abiertos,
+    en_progreso: stats.enProgreso,
+    resuelto: stats.resueltos,
+  }
+
   const filtrados = useMemo(() => {
     const q = busqueda.trim().toLowerCase()
     const base = tickets
       .filter((t) => !q || (correosPorId.get(t.usuarioId) ?? '').toLowerCase().includes(q) || t.asunto.toLowerCase().includes(q))
-      .filter((t) => filtroEstado === 'todos' || t.estado === filtroEstado)
+      .filter((t) => !estadosOcultos.has(t.estado))
       .filter((t) => filtroOrigen === 'todos' || t.origen === filtroOrigen)
     return ordenarTickets(base, orden, correosPorId)
-  }, [tickets, busqueda, filtroEstado, filtroOrigen, orden, correosPorId])
+  }, [tickets, busqueda, estadosOcultos, filtroOrigen, orden, correosPorId])
 
-  const hayFiltros = busqueda.trim() !== '' || filtroEstado !== 'todos' || filtroOrigen !== 'todos'
+  const hayFiltros = busqueda.trim() !== '' || estadosOcultos.size > 0 || filtroOrigen !== 'todos'
 
   // El ticket abierto en el modal se resuelve siempre desde `tickets` (no
   // una copia propia), para que un cambio de estado o de actividad por
@@ -193,13 +242,43 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
             className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
           />
         </label>
-        <select value={filtroEstado} onChange={(e) => setFiltroEstado(e.target.value as typeof filtroEstado)} className={inputBase}>
-          <option value="todos">Estado: todos</option>
-          <option value="abierto">Abierto</option>
-          <option value="en_progreso">En progreso</option>
-          <option value="resuelto">Resuelto</option>
-          <option value="cerrado">Cerrado</option>
-        </select>
+        <div className="relative" ref={estadoRef}>
+          <button
+            type="button"
+            onClick={() => setEstadoAbierto((v) => !v)}
+            aria-haspopup="true"
+            aria-expanded={estadoAbierto}
+            className={`${inputBase} flex items-center gap-1.5`}
+          >
+            Estado
+            {estadosOcultos.size > 0 && (
+              <span className="flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-accent px-1 text-[0.65rem] font-extrabold text-accent-foreground">
+                {estadosOcultos.size}
+              </span>
+            )}
+            <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${estadoAbierto ? 'rotate-180' : ''}`} />
+          </button>
+          {estadoAbierto && (
+            <div className="card-elevated absolute left-0 top-[46px] z-20 w-64 max-w-[calc(100vw-2rem)] rounded-2xl border border-border bg-popover p-2">
+              {TODOS_LOS_ESTADOS.map((estado) => (
+                <label key={estado} className="flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-2 hover:bg-muted">
+                  <input
+                    type="checkbox"
+                    checked={!estadosOcultos.has(estado)}
+                    onChange={() => alternarEstadoOculto(estado)}
+                    className="h-4 w-4 accent-accent"
+                  />
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${COLOR_PUNTO_ESTADO[estado]}`} />
+                  <span className="flex-1 text-[0.83rem] font-semibold text-popover-foreground">{ETIQUETA_ESTADO[estado]}</span>
+                  <span className="text-xs text-muted-foreground">{conteoPorEstado[estado]}</span>
+                </label>
+              ))}
+              <div className="mt-1 border-t border-border px-2 pb-0.5 pt-2 text-[0.68rem] text-muted-foreground">
+                Se recuerda tu elección la próxima vez que abrís esta pantalla.
+              </div>
+            </div>
+          )}
+        </div>
         <select value={filtroOrigen} onChange={(e) => setFiltroOrigen(e.target.value as typeof filtroOrigen)} className={inputBase}>
           <option value="todos">Origen: todos</option>
           <option value="pregunta">Pregunta</option>
@@ -212,7 +291,8 @@ export function AtencionCliente({ tickets, cargando, correosPorId, adminId, onRe
             type="button"
             onClick={() => {
               setBusqueda('')
-              setFiltroEstado('todos')
+              setEstadosOcultos(new Set())
+              setCookie(ESTADOS_OCULTOS_COOKIE, '')
               setFiltroOrigen('todos')
             }}
             className="text-sm font-bold text-accent hover:underline"
@@ -568,7 +648,6 @@ function ModalChat({
               <option value="abierto">Marcar abierto</option>
               <option value="en_progreso">Marcar en progreso</option>
               <option value="resuelto">Marcar resuelto</option>
-              <option value="cerrado">Marcar cerrado</option>
             </select>
             <div ref={eliminarRef} className="relative">
               <button
