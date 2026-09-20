@@ -9,6 +9,10 @@ import { AtencionCliente } from './AtencionCliente'
 import { Mensajes } from './Mensajes'
 import { Estadisticas } from './Estadisticas'
 import { Preguntas } from './Preguntas'
+import { Chat } from './Chat'
+import { UsoLimites } from './UsoLimites'
+import { contarPendientesChat, suscribirseAPendientesChat } from '@/lib/chat'
+import { obtenerUso, obtenerConfigUso, LIMITES, nivelDe } from '@/lib/uso'
 
 export function Panel({ correo, userId, rol }: { correo: string; userId: string; rol: RolAdmin }) {
   const esSubadmin = rol === 'subadmin'
@@ -35,6 +39,22 @@ export function Panel({ correo, userId, rol }: { correo: string; userId: string;
     setTickets(await listarTodosTickets())
     setCargandoTickets(false)
   }, [])
+
+  const [chatPend, setChatPend] = useState(0)
+  const [usoAlerta, setUsoAlerta] = useState(0)
+  const recargarChatPend = useCallback(async () => setChatPend(await contarPendientesChat()), [])
+
+  useEffect(() => {
+    if (esSubadmin) return
+    recargarChatPend()
+    ;(async () => {
+      const [u, c] = await Promise.all([obtenerUso(), obtenerConfigUso()])
+      if (!u) return
+      const lim = LIMITES[c.plan]
+      setUsoAlerta(nivelDe((u.dbBytes / lim.dbBytes) * 100, c) === 'ok' ? 0 : 1)
+    })()
+    return suscribirseAPendientesChat(recargarChatPend)
+  }, [esSubadmin, recargarChatPend])
 
   useEffect(() => {
     recargarUsuarios()
@@ -67,6 +87,7 @@ export function Panel({ correo, userId, rol }: { correo: string; userId: string;
         onCambiarVista={setVista}
         correo={correo}
         pendientes={pendientes}
+        insignias={{ chat: chatPend, uso: usoAlerta }}
         nav={navSidebar}
         rol={rol}
       />
@@ -88,6 +109,10 @@ export function Panel({ correo, userId, rol }: { correo: string; userId: string;
             />
           ) : vistaEfectiva === 'preguntas' ? (
             <Preguntas />
+          ) : vistaEfectiva === 'chat' ? (
+            <Chat adminId={userId} onPendientes={recargarChatPend} />
+          ) : vistaEfectiva === 'uso' ? (
+            <UsoLimites />
           ) : vistaEfectiva === 'mensajes' ? (
             <Mensajes usuarios={usuarios} cargandoUsuarios={cargandoUsuarios} />
           ) : (

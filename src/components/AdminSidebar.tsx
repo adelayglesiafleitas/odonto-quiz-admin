@@ -1,14 +1,16 @@
-import { ShieldCheck, Users, Inbox, Megaphone, BarChart3, BookOpen, LogOut } from 'lucide-react'
+import { ShieldCheck, Users, Inbox, Megaphone, BarChart3, BookOpen, LogOut, MessagesSquare, Gauge } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { TemaToggle } from './TemaToggle'
 
-export type Vista = 'usuarios' | 'atencion' | 'mensajes' | 'estadisticas' | 'preguntas'
+export type Vista = 'usuarios' | 'atencion' | 'mensajes' | 'estadisticas' | 'preguntas' | 'chat' | 'uso'
 
 interface Props {
   vista: Vista
   onCambiarVista: (vista: Vista) => void
   correo: string
   pendientes: number
+  // Insignias extra por vista (chat: reportes+solicitudes, uso: alertas).
+  insignias?: Partial<Record<Vista, number>>
   // Ítems a mostrar. Default: todos (rol admin). Un subadmin recibe un
   // arreglo filtrado a un solo ítem (ver Panel.tsx) — no hay pantalla oculta
   // "por las dudas", directamente no se renderiza el botón.
@@ -23,10 +25,12 @@ export const NAV: { target: Vista; label: string; icon: typeof Users }[] = [
   { target: 'atencion', label: 'Atención al cliente', icon: Inbox },
   { target: 'preguntas', label: 'Preguntas', icon: BookOpen },
   { target: 'mensajes', label: 'Mensajes', icon: Megaphone },
+  { target: 'chat', label: 'Chat', icon: MessagesSquare },
   { target: 'estadisticas', label: 'Estadísticas', icon: BarChart3 },
+  { target: 'uso', label: 'Uso y límites', icon: Gauge },
 ]
 
-export function AdminSidebar({ vista, onCambiarVista, correo, pendientes, nav = NAV, rol }: Props) {
+export function AdminSidebar({ vista, onCambiarVista, correo, pendientes, insignias, nav = NAV, rol }: Props) {
   const inicial = correo.charAt(0).toUpperCase() || '?'
 
   return (
@@ -55,11 +59,14 @@ export function AdminSidebar({ vista, onCambiarVista, correo, pendientes, nav = 
             >
               <Icon className="h-[18px] w-[18px] shrink-0" />
               <span className="hidden flex-1 md:inline">{label}</span>
-              {target === 'atencion' && pendientes > 0 && (
-                <span className="min-w-[1.15rem] rounded-full bg-accent px-1.5 py-0.5 text-center text-[0.68rem] font-extrabold text-accent-foreground">
-                  {pendientes}
-                </span>
-              )}
+              {(() => {
+                const n = target === 'atencion' ? pendientes : (insignias?.[target] ?? 0)
+                return n > 0 ? (
+                  <span className="min-w-[1.15rem] rounded-full bg-accent px-1.5 py-0.5 text-center text-[0.68rem] font-extrabold text-accent-foreground">
+                    {n}
+                  </span>
+                ) : null
+              })()}
             </button>
           )
         })}
