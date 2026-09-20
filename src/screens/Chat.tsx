@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Plus, Search, Ban, BellOff, ShieldCheck, Trash2, Check, X } from 'lucide-react'
+import { Plus, Search, Ban, BellOff, ShieldCheck, Trash2, Check, X, GripVertical, ChevronUp, ChevronDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Campo, Cajon, Interruptor, Panelito, Pildora, Segmentado, fechaCorta, selectCls } from '@/components/ui/extra'
@@ -10,6 +10,23 @@ import type { ConfigChat, SalaAdmin, UsuarioChat, ReporteChat, SolicitudChat, Ac
 type Pestana = 'resumen' | 'grupos' | 'usuarios' | 'pendientes' | 'registro'
 
 const ASIGNATURAS = ['Ortodoncia', 'Pacientes Especiales', 'Materiales Odontológicos', 'Psicología general', 'Examen Práctico']
+
+const COLORES = ['#0e7c86', '#2d6cdf', '#7a5ac8', '#d4527f', '#c0392b', '#c0703a', '#8a6d1c', '#3a8a5c']
+
+const LIMPIEZA_AUTO = [
+  { valor: 0, etiqueta: 'Desactivada' },
+  { valor: 15, etiqueta: '15 días' },
+  { valor: 30, etiqueta: '30 días' },
+  { valor: 60, etiqueta: '60 días' },
+  { valor: 90, etiqueta: '90 días' },
+]
+
+const TOPE_DIARIO = [
+  { valor: 0, etiqueta: 'Sin límite' },
+  { valor: 50, etiqueta: '50' },
+  { valor: 100, etiqueta: '100' },
+  { valor: 200, etiqueta: '200' },
+]
 
 const LENTO = [
   { valor: 0, etiqueta: 'Sin límite' },
@@ -136,7 +153,14 @@ export function Chat({ adminId, onPendientes }: { adminId: string; onPendientes?
         <Grupos
           salas={salas}
           act={act}
+          usuarios={usuarios}
+          adminId={adminId}
+          ejecutar={ejecutar}
+          nombreDe={nombreDe}
           onRecargar={recargar}
+          onEliminar={(sala) =>
+            ejecutar(() => chat.eliminarSala(sala.id), { tipo: 'grupo', detalle: `Grupo eliminado: ${sala.nombre}` })
+          }
           onGuardar={(id, p, texto) => ejecutar(() => chat.guardarSala(id, p), { tipo: 'grupo', detalle: texto, salaId: id })}
           onCrear={async (s) => {
             const r = await chat.crearSala(s)
@@ -269,6 +293,25 @@ function Resumen({
               onChange={(v) => onCambiar({ exigirNormas: v }, `Exigir normas: ${v ? 'sí' : 'no'}`)}
             />
           </Fila>
+          <Fila
+            titulo="Limpieza automática"
+            desc="Cada noche (03:00 UTC) borra los mensajes de usuarios con más de estos días. No toca los de los admins. Mantiene la base de datos ligera."
+          >
+            <Segmentado
+              valor={config.limpiezaAutoDias ?? 0}
+              opciones={LIMPIEZA_AUTO}
+              onChange={(v) =>
+                onCambiar({ limpiezaAutoDias: v === 0 ? null : v }, v === 0 ? 'Limpieza automática desactivada' : `Limpieza automática: mensajes de más de ${v} días`)
+              }
+            />
+          </Fila>
+          <Fila titulo="Tope de mensajes por usuario y día" desc="Máximo de mensajes que un usuario puede enviar en 24 horas (todos los grupos). Frena el spam y el relleno de la base.">
+            <Segmentado
+              valor={config.topeDiario}
+              opciones={TOPE_DIARIO}
+              onChange={(v) => onCambiar({ topeDiario: v }, v === 0 ? 'Tope diario: sin límite' : `Tope diario: ${v} mensajes por usuario`)}
+            />
+          </Fila>
         </div>
       </Panelito>
 
@@ -308,6 +351,8 @@ const VACIA: chat.CamposSala = {
   pausada: false,
   normas: '',
   fijado: '',
+  color: null,
+  descripcion: '',
   palabrasBloqueadas: [],
   archivada: false,
 }
@@ -318,16 +363,44 @@ function Grupos({
   onGuardar,
   onCrear,
   onRecargar,
+  onEliminar,
+  usuarios,
+  adminId,
+  ejecutar,
+  nombreDe,
 }: {
   salas: SalaAdmin[]
   act: Map<string, ActividadSala>
+  usuarios: UsuarioChat[]
+  adminId: string
+  ejecutar: Ejecutar
+  nombreDe: (id: string | null) => string
   onRecargar: () => void
+  onEliminar: (s: SalaAdmin) => Promise<boolean>
   onGuardar: (id: string, p: Partial<chat.CamposSala>, texto: string) => Promise<boolean>
   onCrear: (s: chat.CamposSala) => Promise<boolean>
 }) {
   const [edit, setEdit] = useState<SalaAdmin | 'nuevo' | null>(null)
+  const [arrastra, setArrastra] = useState<string | null>(null)
+  const esAv = (s: SalaAdmin) => s.escribe === 'equipo' && !s.asignatura
+
+  async function reordenar(id: string, destino: number) {
+    const lista = [...salas]
+    const de = lista.findIndex((s) => s.id === id)
+    if (de < 0 || destino < 0 || destino >= lista.length || de === destino) return
+    const [x] = lista.splice(de, 1)
+    lista.splice(destino, 0, x)
+    // «Avisos» se queda siempre arriba.
+    const final = [...lista.filter(esAv), ...lista.filter((s) => !esAv(s))]
+    await Promise.all(final.map((s, i) => ((s.orden !== (i + 1) * 10 ? chat.guardarSala(s.id, { orden: (i + 1) * 10 }) : null))))
+    onRecargar()
+  }
+
   return (
     <div className="space-y-4">
+      <p className="text-xs text-muted-foreground">
+        Arrastra {'⠇'} o usa las flechas para ordenar: es el orden en el que los usuarios ven los grupos. «Avisos» siempre va primero.
+      </p>
       <div className="flex justify-end">
         <Button variant="accent" onClick={() => setEdit('nuevo')}>
           <Plus /> Nuevo grupo
@@ -337,6 +410,7 @@ function Grupos({
         <table className="w-full min-w-[42rem] text-left text-sm">
           <thead className="border-b border-border text-xs text-muted-foreground">
             <tr>
+              <th className="w-24 px-2 py-3 font-bold"><span className="sr-only">Orden</span></th>
               <th className="px-4 py-3 font-bold">Grupo</th>
               <th className="px-4 py-3 font-bold">Entrada</th>
               <th className="px-4 py-3 font-bold">Escribe</th>
@@ -345,9 +419,37 @@ function Grupos({
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {salas.map((s) => (
-              <tr key={s.id} onClick={() => setEdit(s)} className="cursor-pointer hover:bg-muted/50">
-                <td className="px-4 py-3 font-bold text-foreground">{s.nombre}</td>
+            {salas.map((s, i) => (
+              <tr
+                key={s.id}
+                onClick={() => setEdit(s)}
+                draggable={!esAv(s)}
+                onDragStart={() => setArrastra(s.id)}
+                onDragOver={(e) => arrastra && !esAv(s) && e.preventDefault()}
+                onDrop={() => {
+                  if (arrastra) reordenar(arrastra, i)
+                  setArrastra(null)
+                }}
+                onDragEnd={() => setArrastra(null)}
+                className={cn('cursor-pointer hover:bg-muted/50', arrastra === s.id && 'opacity-40')}
+              >
+                <td className="px-2 py-3" onClick={(e) => e.stopPropagation()}>
+                  {esAv(s) ? null : (
+                    <span className="flex items-center gap-0.5 text-muted-foreground">
+                      <GripVertical className="h-4 w-4 cursor-grab" aria-hidden />
+                      <button type="button" aria-label={`Subir ${s.nombre}`} disabled={i === 0 || esAv(salas[i - 1])} onClick={() => reordenar(s.id, i - 1)} className="rounded p-0.5 hover:bg-muted disabled:opacity-30">
+                        <ChevronUp className="h-4 w-4" />
+                      </button>
+                      <button type="button" aria-label={`Bajar ${s.nombre}`} disabled={i === salas.length - 1} onClick={() => reordenar(s.id, i + 1)} className="rounded p-0.5 hover:bg-muted disabled:opacity-30">
+                        <ChevronDown className="h-4 w-4" />
+                      </button>
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-3 font-bold text-foreground">
+                  <span className="mr-2 inline-block h-3 w-3 rounded-full align-middle" style={{ backgroundColor: s.color ?? '#94a3b8' }} />
+                  {s.nombre}
+                </td>
                 <td className="px-4 py-3">{s.acceso === 'libre' ? 'Libre' : 'Con aprobación'}</td>
                 <td className="px-4 py-3">{s.escribe === 'todos' ? 'Todos' : 'Solo equipo'}</td>
                 <td className="px-4 py-3 tabular-nums">
@@ -369,6 +471,13 @@ function Grupos({
           key={edit === 'nuevo' ? 'nuevo' : edit.id}
           sala={edit === 'nuevo' ? null : edit}
           onLimpiado={onRecargar}
+          usuarios={usuarios}
+          adminId={adminId}
+          ejecutar={ejecutar}
+          nombreDe={nombreDe}
+          onEliminar={async () => {
+            if (edit !== 'nuevo' && (await onEliminar(edit))) setEdit(null)
+          }}
           onCerrar={() => setEdit(null)}
           onGuardar={async (campos) => {
             const ok =
@@ -388,15 +497,26 @@ function EditorGrupo({
   onCerrar,
   onGuardar,
   onLimpiado,
+  onEliminar,
+  usuarios,
+  adminId,
+  ejecutar,
+  nombreDe,
 }: {
   sala: SalaAdmin | null
+  usuarios: UsuarioChat[]
+  adminId: string
+  ejecutar: Ejecutar
+  nombreDe: (id: string | null) => string
   onLimpiado: () => void
+  onEliminar: () => Promise<void>
   onCerrar: () => void
   onGuardar: (c: chat.CamposSala) => Promise<void>
 }) {
   const [f, setF] = useState<chat.CamposSala>(sala ? { ...sala } : VACIA)
   const [palabras, setPalabras] = useState((sala?.palabrasBloqueadas ?? []).join(', '))
   const [guardando, setGuardando] = useState(false)
+  const [pest, setPest] = useState<'general' | 'reglas' | 'miembros' | 'delicada'>('general')
   const set = <K extends keyof chat.CamposSala>(k: K, v: chat.CamposSala[K]) => setF((p) => ({ ...p, [k]: v }))
 
   return (
@@ -427,8 +547,61 @@ function EditorGrupo({
         </>
       }
     >
+      <div className="-mt-1 flex gap-1 overflow-x-auto border-b border-border">
+        {(
+          [
+            ['general', 'General'],
+            ['reglas', 'Reglas'],
+            ...(sala ? [['miembros', 'Miembros'], ['delicada', 'Zona delicada']] : []),
+          ] as [typeof pest, string][]
+        ).map(([id, l]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={pest === id}
+            onClick={() => setPest(id)}
+            className={cn(
+              '-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-bold transition-colors',
+              pest === id ? 'border-accent text-primary' : 'border-transparent text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {pest === 'general' && (
+        <>
       <Campo etiqueta="Nombre">
         <Input value={f.nombre} onChange={(e) => set('nombre', e.target.value)} maxLength={60} />
+      </Campo>
+      <Campo etiqueta="Descripción" ayuda="Se muestra en la ficha del grupo (Información y normas).">
+        <Input value={f.descripcion} onChange={(e) => set('descripcion', e.target.value)} maxLength={200} />
+      </Campo>
+      <Campo etiqueta="Color del icono" ayuda="Es el color del círculo del grupo en la app.">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            aria-label="Color automático"
+            aria-pressed={f.color === null}
+            onClick={() => set('color', null)}
+            className={cn('h-8 rounded-full border px-3 text-xs font-bold', f.color === null ? 'border-accent text-accent' : 'border-border text-muted-foreground')}
+          >
+            Auto
+          </button>
+          {COLORES.map((c) => (
+            <button
+              key={c}
+              type="button"
+              aria-label={`Color ${c}`}
+              aria-pressed={f.color === c}
+              onClick={() => set('color', c)}
+              className={cn('h-8 w-8 rounded-full border-2 transition', f.color === c ? 'scale-110 border-foreground' : 'border-transparent')}
+              style={{ backgroundColor: c }}
+            />
+          ))}
+        </div>
       </Campo>
       <Campo etiqueta="Asignatura" ayuda="Vincula el grupo a una asignatura de la app (o ninguna).">
         <select className={selectCls} value={f.asignatura ?? ''} onChange={(e) => set('asignatura', e.target.value || null)}>
@@ -438,6 +611,11 @@ function EditorGrupo({
           ))}
         </select>
       </Campo>
+        </>
+      )}
+
+      {pest === 'reglas' && (
+        <>
       <Campo etiqueta="Entrada">
         <Segmentado
           valor={f.acceso}
@@ -453,7 +631,7 @@ function EditorGrupo({
           valor={f.escribe}
           opciones={[
             { valor: 'todos', etiqueta: 'Todos' },
-            { valor: 'equipo', etiqueta: 'Solo equipo' },
+            { valor: 'equipo', etiqueta: 'Solo admins' },
           ]}
           onChange={(v) => set('escribe', v)}
         />
@@ -474,11 +652,6 @@ function EditorGrupo({
       <Campo etiqueta="Palabras bloqueadas" ayuda="Separadas por comas. El mensaje que las contenga se rechaza.">
         <Input value={palabras} onChange={(e) => setPalabras(e.target.value)} />
       </Campo>
-      {sala && (
-        <div className="rounded-xl border border-border p-4">
-          <Limpieza salas={[sala]} fija onListo={onLimpiado} compacto />
-        </div>
-      )}
       <div className="divide-y divide-border">
         <Fila titulo="Pausar grupo" desc="Nadie puede escribir mientras esté pausado.">
           <Interruptor activo={f.pausada} etiqueta="Pausar" onChange={(v) => set('pausada', v)} />
@@ -487,7 +660,205 @@ function EditorGrupo({
           <Interruptor activo={f.archivada} etiqueta="Archivar" onChange={(v) => set('archivada', v)} />
         </Fila>
       </div>
+        </>
+      )}
+
+      {pest === 'miembros' && sala && (
+        <MiembrosGrupo sala={sala} usuarios={usuarios} adminId={adminId} ejecutar={ejecutar} nombreDe={nombreDe} />
+      )}
+
+      {pest === 'delicada' && sala && (
+        <>
+          <div className="rounded-xl border border-border p-4">
+            <Limpieza salas={[sala]} fija onListo={onLimpiado} compacto />
+          </div>
+          <EliminarGrupo nombre={sala.nombre} onEliminar={onEliminar} />
+        </>
+      )}
     </Cajon>
+  )
+}
+
+function MiembrosGrupo({
+  sala,
+  usuarios,
+  adminId,
+  ejecutar,
+  nombreDe,
+}: {
+  sala: SalaAdmin
+  usuarios: UsuarioChat[]
+  adminId: string
+  ejecutar: Ejecutar
+  nombreDe: (id: string | null) => string
+}) {
+  const [mem, setMem] = useState<{ userId: string; estado: 'activo' | 'pendiente' | 'expulsado' }[]>([])
+  const [sil, setSil] = useState<chat.SilencioActivo[]>([])
+  const [q, setQ] = useState('')
+  const [menu, setMenu] = useState<string | null>(null)
+
+  const cargar = useCallback(async () => {
+    const [m, s] = await Promise.all([chat.miembrosDeSala(sala.id), chat.silenciosActivos()])
+    setMem(m)
+    setSil(s)
+  }, [sala.id])
+  useEffect(() => {
+    cargar()
+  }, [cargar])
+
+  const porId = useMemo(() => new Map(usuarios.map((u) => [u.userId, u] as const)), [usuarios])
+  const lista = mem.filter((m) => {
+    const t = q.trim().toLowerCase()
+    if (!t) return true
+    const u = porId.get(m.userId)
+    return `${u?.alias ?? ''} ${u?.email ?? ''}`.toLowerCase().includes(t)
+  })
+  const estaSilenciado = (id: string) => sil.some((s) => s.userId === id && (s.salaId === null || s.salaId === sala.id))
+
+  const accion = async (fn: () => Promise<string | null>, userId: string, detalle: string) => {
+    const ok = await ejecutar(fn, { tipo: 'membresia', detalle, salaId: sala.id, usuarioId: userId })
+    if (ok) cargar()
+  }
+
+  return (
+    <div className="rounded-xl border border-border p-4">
+      <p className="text-sm font-extrabold text-foreground">Miembros ({mem.filter((m) => m.estado === 'activo').length})</p>
+      <Input id="miembros-buscar" className="my-3" placeholder="Buscar por alias o correo" value={q} onChange={(e) => setQ(e.target.value)} />
+      {lista.length === 0 && <p className="text-xs text-muted-foreground">Sin miembros.</p>}
+      <ul className="divide-y divide-border">
+        {lista.map((m) => {
+          const nombre = nombreDe(m.userId)
+          const u = porId.get(m.userId)
+          const sile = estaSilenciado(m.userId)
+          return (
+            <li key={m.userId} className="space-y-2 py-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-foreground">{u?.alias ?? nombre}</p>
+                  <p className="truncate text-xs text-muted-foreground">{u?.email}</p>
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  {sile && <Pildora tono="aviso">Silenciado</Pildora>}
+                  <Pildora tono={m.estado === 'activo' ? 'ok' : m.estado === 'pendiente' ? 'aviso' : 'error'}>{m.estado}</Pildora>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {m.estado === 'pendiente' && (
+                  <Button size="sm" variant="accent" onClick={() => accion(() => chat.cambiarMembresia(sala.id, m.userId, 'activo'), m.userId, `${nombre} aprobado en ${sala.nombre}`)}>
+                    Aprobar
+                  </Button>
+                )}
+                {sile ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      accion(
+                        async () => (await chat.quitarSilencioEn(m.userId, sala.id)) ?? (await chat.quitarSilencioEn(m.userId, null)),
+                        m.userId,
+                        `${nombre}: silencio quitado en ${sala.nombre}`,
+                      )
+                    }
+                  >
+                    Quitar silencio
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="outline" onClick={() => setMenu(menu === m.userId ? null : m.userId)}>
+                    <BellOff /> Silenciar
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() =>
+                    accion(
+                      () => chat.cambiarMembresia(sala.id, m.userId, m.estado === 'expulsado' ? 'activo' : 'expulsado'),
+                      m.userId,
+                      `${nombre}: ${m.estado === 'expulsado' ? 'readmitido en' : 'expulsado de'} ${sala.nombre}`,
+                    )
+                  }
+                >
+                  {m.estado === 'expulsado' ? 'Readmitir' : 'Expulsar'}
+                </Button>
+              </div>
+              {menu === m.userId && (
+                <div className="flex flex-wrap gap-1.5">
+                  {(
+                    [
+                      ['1 h', 1],
+                      ['24 h', 24],
+                      ['7 días', 168],
+                      ['Indefinido', null],
+                    ] as [string, number | null][]
+                  ).map(([l, h]) => (
+                    <Button
+                      key={l}
+                      size="sm"
+                      variant="secondary"
+                      onClick={async () => {
+                        setMenu(null)
+                        const hasta = h === null ? chat.HASTA_SIEMPRE : new Date(Date.now() + h * 3600000).toISOString()
+                        await accion(
+                          () => chat.silenciar(m.userId, sala.id, hasta, 'Silenciado por el equipo', adminId),
+                          m.userId,
+                          `${nombre} silenciado ${l} en ${sala.nombre}`,
+                        )
+                      }}
+                    >
+                      {l}
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
+function EliminarGrupo({ nombre, onEliminar }: { nombre: string; onEliminar: () => Promise<void> }) {
+  const [abierto, setAbierto] = useState(false)
+  const [texto, setTexto] = useState('')
+  const [borrando, setBorrando] = useState(false)
+  const coincide = texto.trim().toLowerCase() === nombre.trim().toLowerCase()
+  return (
+    <div className="rounded-xl border border-destructive/40 p-4">
+      <p className="text-sm font-extrabold text-foreground">Eliminar grupo</p>
+      <p className="mb-3 text-xs text-muted-foreground">
+        Borra el grupo, sus miembros y todos sus mensajes. No se puede deshacer. Si solo quieres ocultarlo, usa «Archivar».
+      </p>
+      {!abierto ? (
+        <Button variant="outline" size="sm" onClick={() => setAbierto(true)}>
+          <Trash2 /> Eliminar grupo…
+        </Button>
+      ) : (
+        <div className="space-y-2">
+          <label className="block space-y-1">
+            <span className="text-xs font-bold text-foreground">Escribe «{nombre}» para confirmar</span>
+            <Input id="eliminar-grupo-nombre" value={texto} onChange={(e) => setTexto(e.target.value)} />
+          </label>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setAbierto(false)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={!coincide || borrando}
+              onClick={async () => {
+                setBorrando(true)
+                await onEliminar()
+                setBorrando(false)
+              }}
+            >
+              <Trash2 /> Eliminar definitivamente
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -792,6 +1163,7 @@ function FichaUsuario({
     cargar()
   }, [cargar, u.mensajes, u.grupos])
 
+  const [ambito, setAmbito] = useState('')
   const dur = (horas: number | null) =>
     horas === null ? chat.HASTA_SIEMPRE : new Date(Date.now() + horas * 3600000).toISOString()
 
@@ -822,8 +1194,16 @@ function FichaUsuario({
         />
       </Campo>
 
-      <Campo etiqueta="Silenciar (en todos los grupos)" ayuda={silenciado(u) ? `Silenciado hasta ${fechaCorta(u.silencioHasta)}` : 'Puede leer pero no escribir.'}>
+      <Campo etiqueta="Silenciar" ayuda={silenciado(u) ? `Silenciado hasta ${fechaCorta(u.silencioHasta)}` : 'Puede leer pero no escribir.'}>
         <div className="flex flex-wrap gap-2">
+          <select className={selectCls} aria-label="Dónde silenciar" value={ambito} onChange={(e) => setAmbito(e.target.value)}>
+            <option value="">En todos los grupos</option>
+            {salas.map((s) => (
+              <option key={s.id} value={s.id}>
+                Solo en {s.nombre}
+              </option>
+            ))}
+          </select>
           {[
             ['1 h', 1],
             ['24 h', 24],
@@ -835,9 +1215,9 @@ function FichaUsuario({
               size="sm"
               variant="outline"
               onClick={() =>
-                ejecutar(() => chat.silenciar(u.userId, null, dur(h as number | null), 'Silenciado por el equipo', adminId), {
+                ejecutar(() => chat.silenciar(u.userId, ambito || null, dur(h as number | null), 'Silenciado por el equipo', adminId), {
                   tipo: 'silencio',
-                  detalle: `${nombre} silenciado ${l}`,
+                  detalle: `${nombre} silenciado ${l}${ambito ? ` en ${salas.find((x) => x.id === ambito)?.nombre}` : ''}`,
                   ...ref,
                 })
               }
@@ -1070,7 +1450,7 @@ function Registro({
             <div className="min-w-0 flex-1">
               <p className="text-sm text-foreground">{a.detalle}</p>
               <p className="text-xs text-muted-foreground">
-                {nombreDe(a.adminId)} · {fechaCorta(a.creadoEn)}
+                {a.adminId ? nombreDe(a.adminId) : 'Automático'} · {fechaCorta(a.creadoEn)}
                 {a.salaId ? ` · ${salaDe(a.salaId)}` : ''}
               </p>
             </div>

@@ -12,6 +12,10 @@ export interface ConfigChat {
   modoAcceso: ModoAcceso
   exigirAlias: boolean
   exigirNormas: boolean
+  /** Días tras los que se borran solos los mensajes de usuarios (null = desactivado). */
+  limpiezaAutoDias: number | null
+  /** Máximo de mensajes por usuario en 24 h (0 = sin límite). */
+  topeDiario: number
 }
 
 export interface SalaAdmin {
@@ -25,6 +29,9 @@ export interface SalaAdmin {
   pausada: boolean
   normas: string
   fijado: string
+  /** Color del icono (hex) o null = automático. */
+  color: string | null
+  descripcion: string
   palabrasBloqueadas: string[]
   archivada: boolean
 }
@@ -62,7 +69,8 @@ export interface SolicitudChat {
 
 export interface AccionChat {
   id: number
-  adminId: string
+  /** null = acción automática (p. ej. limpieza nocturna). */
+  adminId: string | null
   tipo: string
   salaId: string | null
   usuarioId: string | null
@@ -92,6 +100,8 @@ function mapSala(f: any): SalaAdmin {
     pausada: !!f.pausada,
     normas: f.normas ?? '',
     fijado: f.fijado ?? '',
+    color: f.color ?? null,
+    descripcion: f.descripcion ?? '',
     palabrasBloqueadas: f.palabras_bloqueadas ?? [],
     archivada: !!f.archivada,
   }
@@ -104,6 +114,8 @@ export async function obtenerConfig(): Promise<ConfigChat> {
     modoAcceso: (data?.modo_acceso as ModoAcceso) ?? 'todos',
     exigirAlias: data?.exigir_alias ?? true,
     exigirNormas: data?.exigir_normas ?? true,
+    limpiezaAutoDias: data?.limpieza_auto_dias ?? null,
+    topeDiario: data?.tope_diario ?? 100,
   }
 }
 
@@ -113,6 +125,8 @@ export async function guardarConfig(parcial: Partial<ConfigChat>): Promise<strin
   if (parcial.modoAcceso !== undefined) fila.modo_acceso = parcial.modoAcceso
   if (parcial.exigirAlias !== undefined) fila.exigir_alias = parcial.exigirAlias
   if (parcial.exigirNormas !== undefined) fila.exigir_normas = parcial.exigirNormas
+  if (parcial.limpiezaAutoDias !== undefined) fila.limpieza_auto_dias = parcial.limpiezaAutoDias
+  if (parcial.topeDiario !== undefined) fila.tope_diario = parcial.topeDiario
   const { error } = await supabase.from('comunidad_config').update(fila).eq('id', true)
   return error?.message ?? null
 }
@@ -135,6 +149,8 @@ function aFilaSala(s: Partial<CamposSala>) {
   if (s.pausada !== undefined) f.pausada = s.pausada
   if (s.normas !== undefined) f.normas = s.normas
   if (s.fijado !== undefined) f.fijado = s.fijado
+  if (s.color !== undefined) f.color = s.color
+  if (s.descripcion !== undefined) f.descripcion = s.descripcion
   if (s.palabrasBloqueadas !== undefined) f.palabras_bloqueadas = s.palabrasBloqueadas
   if (s.archivada !== undefined) f.archivada = s.archivada
   return f
@@ -373,4 +389,33 @@ export async function limpiarMensajes(
     p_ejecutar: ejecutar,
   })
   return { n: Number(data ?? 0), error: error?.message ?? null }
+}
+
+/** Elimina el grupo con todos sus mensajes, miembros y reportes (borrado en cascada en la base). */
+export async function eliminarSala(id: string): Promise<string | null> {
+  const { error } = await supabase.from('comunidad_salas').delete().eq('id', id)
+  return error?.message ?? null
+}
+
+export interface SilencioActivo {
+  userId: string
+  salaId: string | null
+  hasta: string
+}
+
+/** Silencios vigentes (los de sala_id null valen para todos los grupos). */
+export async function silenciosActivos(): Promise<SilencioActivo[]> {
+  const { data } = await supabase.from('comunidad_silencios').select('user_id, sala_id, hasta').gt('hasta', new Date().toISOString())
+  return ((data ?? []) as any[]).map((f) => ({ userId: f.user_id, salaId: f.sala_id, hasta: f.hasta }))
+}
+
+export async function quitarSilencioEn(userId: string, salaId: string | null): Promise<string | null> {
+  const q = supabase.from('comunidad_silencios').delete().eq('user_id', userId)
+  const { error } = await (salaId === null ? q.is('sala_id', null) : q.eq('sala_id', salaId))
+  return error?.message ?? null
+}
+
+export async function miembrosDeSala(salaId: string): Promise<{ userId: string; estado: 'activo' | 'pendiente' | 'expulsado' }[]> {
+  const { data } = await supabase.from('comunidad_miembros').select('user_id, estado').eq('sala_id', salaId)
+  return ((data ?? []) as any[]).map((f) => ({ userId: f.user_id, estado: f.estado }))
 }
