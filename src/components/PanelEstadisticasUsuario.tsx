@@ -10,6 +10,7 @@ import {
 } from '@/lib/historial'
 import type { Usuario } from '@/lib/usuarios'
 import { COLOR_ASIGNATURA_DEFAULT, type ColorAsignatura } from '@/lib/coloresAsignatura'
+import { formatoUltimoAcceso } from '@/lib/fechas'
 
 // Color por cursoId, no por el string de `preguntas.asignatura` — a
 // propósito NO se reusa colorAsignatura() de lib/coloresAsignatura.ts acá:
@@ -113,7 +114,7 @@ export function PanelEstadisticasUsuario({ usuario, onClose }: Props) {
                 {usuario.ultimoAcceso && (
                   <>
                     <span>·</span>
-                    <span>Último acceso {fechaCorta(usuario.ultimoAcceso)}</span>
+                    <span title={formatoUltimoAcceso(usuario.ultimoAcceso).full}>Último acceso {formatoUltimoAcceso(usuario.ultimoAcceso).label.toLowerCase()}</span>
                   </>
                 )}
               </div>

@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button'
 import { PanelEstadisticasUsuario } from '@/components/PanelEstadisticasUsuario'
 import { ThOrdenable, cambiarOrden, type EstadoOrden } from '@/components/ThOrdenable'
 import { getCookie, setCookie } from '@/lib/cookies'
+import { formatoUltimoAcceso } from '@/lib/fechas'
 import {
   emailPareceSospechoso,
   asignarRolAdmin,
@@ -602,7 +603,12 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
                       </button>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 font-mono text-muted-foreground">{fmt(u.creadoEn)}</td>
-                    <td className="whitespace-nowrap px-4 py-3 font-mono text-muted-foreground">{fmt(u.ultimoAcceso)}</td>
+                    <td
+                      className="whitespace-nowrap px-4 py-3 font-mono text-muted-foreground"
+                      title={formatoUltimoAcceso(u.ultimoAcceso).full}
+                    >
+                      {formatoUltimoAcceso(u.ultimoAcceso).label}
+                    </td>
                     <td className="whitespace-nowrap px-4 py-3 font-mono tabular-nums text-foreground">{u.simulacros}</td>
                     <td className="whitespace-nowrap px-4 py-3 font-mono tabular-nums text-foreground">
                       {u.promedio === null ? '—' : `${u.promedio}%`}
