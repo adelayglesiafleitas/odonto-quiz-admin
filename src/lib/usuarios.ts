@@ -6,7 +6,12 @@ export interface Usuario {
   email: string
   nickname: string | null
   creadoEn: string
+  // Último login con contraseña (auth.users.last_sign_in_at). Casi no
+  // cambia: la sesión queda guardada. Se deja solo para el tooltip.
   ultimoAcceso: string | null
+  // Última vez que abrió la app o volvió a ella (perfiles.ultima_apertura,
+  // ver supabase/schema.sql sección 13 en odonto-quiz-proyecto-react).
+  ultimaApertura: string | null
   rolAdmin: RolAdmin | 'usuario'
   simulacros: number
   promedio: number | null
@@ -20,6 +25,7 @@ interface FilaRpc {
   nickname: string | null
   creado_en: string
   ultimo_acceso: string | null
+  ultima_apertura: string | null
 }
 
 // admin_listar_usuarios() ya hace su propio chequeo de `admins` adentro
@@ -80,6 +86,7 @@ export async function listarUsuarios(): Promise<Usuario[]> {
       nickname: fila.nickname,
       creadoEn: fila.creado_en,
       ultimoAcceso: fila.ultimo_acceso,
+      ultimaApertura: fila.ultima_apertura,
       rolAdmin: rolPorUsuario.get(fila.user_id) ?? 'usuario',
       simulacros: resumen?.simulacros ?? 0,
       promedio: resumen && resumen.simulacros > 0 ? Math.round(resumen.sumaPorcentaje / resumen.simulacros) : null,
@@ -195,4 +202,20 @@ export function emailPareceSospechoso(email: string): boolean {
   if (!dominio) return true
   const tld = dominio.split('.').pop()?.toLowerCase()
   return !tld || !TLDS_CONOCIDOS.has(tld)
+}
+
+// Aperturas de hoy (desde las 00:00 de este navegador), lo más reciente
+// primero. Consulta ligera para la tarjeta "Últimos en abrir la app" y las
+// cifras "En la app ahora" / "Abrieron hoy", que se refrescan cada 30 s sin
+// recargar toda la lista de usuarios. Un admin lee `perfiles` por RLS.
+export async function listarAperturasHoy(): Promise<{ userId: string; ultimaApertura: string }[]> {
+  const inicioHoy = new Date()
+  inicioHoy.setHours(0, 0, 0, 0)
+  const { data, error } = await supabase
+    .from('perfiles')
+    .select('user_id, ultima_apertura')
+    .gte('ultima_apertura', inicioHoy.toISOString())
+    .order('ultima_apertura', { ascending: false })
+  if (error || !data) return []
+  return data.map((f) => ({ userId: f.user_id as string, ultimaApertura: f.ultima_apertura as string }))
 }

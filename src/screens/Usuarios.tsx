@@ -17,12 +17,13 @@ import {
   Unlock,
   ChevronLeft,
   ChevronRight,
+  RefreshCw,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { PanelEstadisticasUsuario } from '@/components/PanelEstadisticasUsuario'
 import { ThOrdenable, cambiarOrden, type EstadoOrden } from '@/components/ThOrdenable'
 import { getCookie, setCookie } from '@/lib/cookies'
-import { formatoUltimoAcceso } from '@/lib/fechas'
+import { formatoApertura, formatoUltimoAcceso, COLOR_NIVEL_APERTURA, MIN_EN_LA_APP } from '@/lib/fechas'
 import {
   emailPareceSospechoso,
   asignarRolAdmin,
@@ -32,6 +33,7 @@ import {
   marcarTourBienvenida,
   marcarAcademiaHabilitada,
   type Usuario,
+  listarAperturasHoy,
 } from '@/lib/usuarios'
 
 type FiltroRol = 'todos' | 'admin' | 'subadmin' | 'user'
@@ -44,7 +46,7 @@ type ColOrdenUsuarios =
   | 'n'
   | 'email'
   | 'creadoEn'
-  | 'ultimoAcceso'
+  | 'ultimaApertura'
   | 'simulacros'
   | 'promedio'
   | 'vioTourBienvenida'
@@ -67,7 +69,7 @@ function ordenarUsuarios(lista: Usuario[], orden: EstadoOrden<ColOrdenUsuarios>)
   copia.sort((a, b) => {
     switch (col) {
       case 'creadoEn':
-      case 'ultimoAcceso': {
+      case 'ultimaApertura': {
         const da = a[col] ? new Date(a[col] as string).getTime() : -Infinity
         const db = b[col] ? new Date(b[col] as string).getTime() : -Infinity
         return (da - db) * mult
@@ -301,7 +303,7 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
   const [actividad, setActividad] = useState<FiltroActividad>('todos')
   const [porPagina, setPorPagina] = useState<TamanoPagina>(getTamanoPaginaGuardado)
   const [pagina, setPagina] = useState(0)
-  const [orden, setOrden] = useState<EstadoOrden<ColOrdenUsuarios>>({ col: null, dir: 'asc' })
+  const [orden, setOrden] = useState<EstadoOrden<ColOrdenUsuarios>>({ col: 'ultimaApertura', dir: 'desc' })
 
   const [procesandoId, setProcesandoId] = useState<string | null>(null)
   const [errorAccion, setErrorAccion] = useState<string | null>(null)
@@ -404,6 +406,26 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
     }
   }
 
+  // Aperturas de hoy: consulta propia y ligera, refrescada cada 30 s, para
+  // que "En la app ahora", "Abrieron hoy" y la tarjeta de últimos se muevan
+  // solas sin recargar (ni poner el spinner en) toda la tabla.
+  const [aperturasHoy, setAperturasHoy] = useState<{ userId: string; ultimaApertura: string }[] | null>(null)
+  const [recargaAperturas, setRecargaAperturas] = useState(0)
+  useEffect(() => {
+    let cancelado = false
+    listarAperturasHoy().then((datos) => {
+      if (!cancelado) setAperturasHoy(datos)
+    })
+    return () => {
+      cancelado = true
+    }
+  }, [recargaAperturas])
+  useEffect(() => {
+    const id = setInterval(() => setRecargaAperturas((n) => n + 1), 30_000)
+    return () => clearInterval(id)
+  }, [])
+  const enLaAppAhora = (aperturasHoy ?? []).filter((a) => Date.now() - new Date(a.ultimaApertura).getTime() < MIN_EN_LA_APP * 60_000).length
+
   const stats = useMemo(() => {
     const haceUnaSemana = Date.now() - 7 * 24 * 60 * 60 * 1000
     return {
@@ -455,12 +477,21 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
         <p className="mt-1 text-sm text-muted-foreground">Cuentas registradas en el proyecto — datos en vivo desde Supabase.</p>
       </div>
 
-      <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <StatCard etiqueta="Total usuarios" valor={stats.total} cargando={cargando} />
+        <StatCard etiqueta="En la app ahora" valor={enLaAppAhora} cargando={aperturasHoy === null} vivo />
+        <StatCard etiqueta="Abrieron hoy" valor={(aperturasHoy ?? []).length} cargando={aperturasHoy === null} />
         <StatCard etiqueta="Simulacros completados" valor={stats.simulacros} cargando={cargando} />
         <StatCard etiqueta="Nuevos esta semana" valor={stats.nuevos} cargando={cargando} />
         <StatCard etiqueta="Admins" valor={stats.admins} cargando={cargando} />
       </div>
+
+      <UltimosEnAbrir
+        aperturas={aperturasHoy}
+        usuarios={usuarios}
+        onActualizar={() => setRecargaAperturas((n) => n + 1)}
+        onVerUsuario={setUsuarioEstadisticas}
+      />
 
       <div className="mb-1 flex flex-wrap items-center gap-2.5">
         <label className="flex h-10 min-w-[200px] flex-1 items-center gap-2 rounded-xl border border-border bg-card px-3 text-muted-foreground">
@@ -534,9 +565,9 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
                 <ThOrdenable col="email" activo={orden} label="Usuario" onOrdenar={(c) => setOrden((prev) => cambiarOrden(prev, c))} />
                 <ThOrdenable col="creadoEn" activo={orden} label="Alta" onOrdenar={(c) => setOrden((prev) => cambiarOrden(prev, c))} />
                 <ThOrdenable
-                  col="ultimoAcceso"
+                  col="ultimaApertura"
                   activo={orden}
-                  label="Último acceso"
+                  label="Última apertura"
                   onOrdenar={(c) => setOrden((prev) => cambiarOrden(prev, c))}
                 />
                 <ThOrdenable col="simulacros" activo={orden} label="Simulacros" onOrdenar={(c) => setOrden((prev) => cambiarOrden(prev, c))} />
@@ -603,11 +634,8 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
                       </button>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 font-mono text-muted-foreground">{fmt(u.creadoEn)}</td>
-                    <td
-                      className="whitespace-nowrap px-4 py-3 font-mono text-muted-foreground"
-                      title={formatoUltimoAcceso(u.ultimoAcceso).full}
-                    >
-                      {formatoUltimoAcceso(u.ultimoAcceso).label}
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <CeldaApertura usuario={u} />
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 font-mono tabular-nums text-foreground">{u.simulacros}</td>
                     <td className="whitespace-nowrap px-4 py-3 font-mono tabular-nums text-foreground">
@@ -676,12 +704,17 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
 
       <p className="mt-4 flex max-w-[62ch] items-start gap-2 text-xs leading-relaxed text-muted-foreground">
         <UsersIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        Fuente de estos datos: <code className="mx-1 rounded bg-muted px-1 py-0.5">auth.users</code> (alta, último acceso) vía la
-        función <code className="mx-1 rounded bg-muted px-1 py-0.5">admin_listar_usuarios</code>,
-        <code className="mx-1 rounded bg-muted px-1 py-0.5">historial_intentos</code> agregado por usuario,{' '}
-        <code className="mx-1 rounded bg-muted px-1 py-0.5">admins</code> para el rol y{' '}
-        <code className="mx-1 rounded bg-muted px-1 py-0.5">perfiles</code> para el tour de bienvenida y el acceso a Academia
-        (sin fila creada = "No visto" / "No habilitada"). Los planes pagos llegan con la integración de Stripe.
+        {/* Todo el texto en un solo <span>: dentro del <p> flex, cada trozo suelto
+            se volvía una columna aparte y el párrafo se partía en tiras. */}
+        <span>
+          Fuente de estos datos: <code className="mx-1 rounded bg-muted px-1 py-0.5">auth.users</code> (alta, último login) vía la
+          función <code className="mx-1 rounded bg-muted px-1 py-0.5">admin_listar_usuarios</code>,
+          <code className="mx-1 rounded bg-muted px-1 py-0.5">historial_intentos</code> agregado por usuario,{' '}
+          <code className="mx-1 rounded bg-muted px-1 py-0.5">admins</code> para el rol y{' '}
+          <code className="mx-1 rounded bg-muted px-1 py-0.5">perfiles</code> para la última apertura de la app, el tour de
+          bienvenida y el acceso a Academia (sin fila creada = "No visto" / "No habilitada"). Los planes pagos llegan con la
+          integración de Stripe.
+        </span>
       </p>
 
       {usuarioMenu && menuPos && (
@@ -774,11 +807,112 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
   )
 }
 
-function StatCard({ etiqueta, valor, cargando }: { etiqueta: string; valor: number; cargando: boolean }) {
+function StatCard({ etiqueta, valor, cargando, vivo = false }: { etiqueta: string; valor: number; cargando: boolean; vivo?: boolean }) {
   return (
-    <div className="rounded-2xl border border-border bg-card px-4 py-3.5">
+    <div className={`rounded-2xl border bg-card px-4 py-3.5 ${vivo ? 'border-success/40' : 'border-border'}`}>
       <div className="font-mono text-2xl font-extrabold tabular-nums text-foreground">{cargando ? '—' : valor}</div>
-      <div className="mt-0.5 text-xs font-semibold text-muted-foreground">{etiqueta}</div>
+      <div className="mt-0.5 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+        {vivo && <span className="h-2 w-2 animate-pulse rounded-full bg-success" />}
+        {etiqueta}
+      </div>
+    </div>
+  )
+}
+
+// Celda "Última apertura": día y hora explícitos + relativo + punto de color
+// (verde: en la app ahora; acento: hoy; gris: antes). El último login con
+// contraseña queda en el tooltip, que es el dato que antes se mostraba aquí.
+function CeldaApertura({ usuario }: { usuario: Usuario }) {
+  const a = formatoApertura(usuario.ultimaApertura)
+  const login = usuario.ultimoAcceso ? formatoUltimoAcceso(usuario.ultimoAcceso).full : 'nunca'
+  return (
+    <span className="flex items-center gap-2" title={`Abrió la app: ${a.full}\nÚltimo login con contraseña: ${login}`}>
+      <span className={`h-2 w-2 shrink-0 rounded-full ${COLOR_NIVEL_APERTURA[a.nivel]}`} />
+      <span className="flex flex-col leading-tight">
+        <span className={`font-semibold ${a.nivel === 'nunca' ? 'text-muted-foreground' : 'text-foreground'}`}>
+          {a.dia}
+          {a.hora && (
+            <>
+              {' · '}
+              <span className="font-mono">{a.hora}</span>
+            </>
+          )}
+        </span>
+        <span className="text-[11px] text-muted-foreground">{a.relativo}</span>
+      </span>
+    </span>
+  )
+}
+
+// Tarjeta "Últimos en abrir la app": los 6 más recientes de hoy, con su hora.
+function UltimosEnAbrir({
+  aperturas,
+  usuarios,
+  onActualizar,
+  onVerUsuario,
+}: {
+  aperturas: { userId: string; ultimaApertura: string }[] | null
+  usuarios: Usuario[]
+  onActualizar: () => void
+  onVerUsuario: (u: Usuario) => void
+}) {
+  const porId = new Map(usuarios.map((u) => [u.id, u] as const))
+  const ultimos = (aperturas ?? []).filter((a) => porId.has(a.userId)).slice(0, 6)
+  return (
+    <div className="mb-6 rounded-2xl border border-accent/30 bg-card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[13.5px] font-bold text-foreground">Últimos en abrir la app</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">Cada vez que alguien abre o vuelve a la app · se actualiza sola cada 30 s</p>
+        </div>
+        <button
+          type="button"
+          onClick={onActualizar}
+          className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-border px-3 text-[12.5px] font-bold text-foreground transition hover:bg-muted"
+        >
+          <RefreshCw className="h-3.5 w-3.5" />
+          Actualizar
+        </button>
+      </div>
+      {aperturas === null ? (
+        <div className="flex justify-center py-6">
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        </div>
+      ) : ultimos.length === 0 ? (
+        <p className="py-6 text-center text-xs text-muted-foreground">Nadie ha abierto la app todavía hoy.</p>
+      ) : (
+        <div className="mt-2 grid gap-x-6 md:grid-cols-2">
+          {ultimos.map((ap) => {
+            const u = porId.get(ap.userId)!
+            const a = formatoApertura(ap.ultimaApertura)
+            const nombre = u.nickname?.trim() || u.email
+            return (
+              <button
+                key={ap.userId}
+                type="button"
+                onClick={() => onVerUsuario(u)}
+                title={a.full}
+                className="flex items-center gap-3 border-t border-border py-2.5 text-left transition hover:bg-muted/40"
+              >
+                <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/15 text-[12px] font-extrabold text-accent">
+                  {nombre.charAt(0).toUpperCase()}
+                  {a.nivel === 'ahora' && (
+                    <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-card bg-success" />
+                  )}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-bold text-foreground">{nombre}</span>
+                  <span className="block text-[11px] text-muted-foreground">{a.relativo}</span>
+                </span>
+                <span className="shrink-0 text-right">
+                  <span className={`block font-mono text-[13px] font-bold ${a.nivel === 'ahora' ? 'text-success' : 'text-foreground'}`}>{a.hora}</span>
+                  <span className="block text-[11px] text-muted-foreground">{a.dia}</span>
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

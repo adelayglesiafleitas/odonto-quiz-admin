@@ -1,8 +1,9 @@
-import { ShieldCheck, Users, Inbox, Megaphone, BarChart3, BookOpen, LogOut, MessagesSquare, Gauge } from 'lucide-react'
+import { ShieldCheck, Users, Inbox, Megaphone, BarChart3, BookOpen, LogOut, MessagesSquare, Gauge, ClipboardList } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { TemaToggle } from './TemaToggle'
 
-export type Vista = 'usuarios' | 'atencion' | 'mensajes' | 'estadisticas' | 'preguntas' | 'chat' | 'uso'
+// ENCUESTA-TEMPORAL: 'encuesta' (quitar junto con su ítem de NAV)
+export type Vista = 'usuarios' | 'atencion' | 'mensajes' | 'estadisticas' | 'preguntas' | 'chat' | 'uso' | 'encuesta'
 
 interface Props {
   vista: Vista
@@ -27,6 +28,7 @@ export const NAV: { target: Vista; label: string; icon: typeof Users }[] = [
   { target: 'mensajes', label: 'Mensajes', icon: Megaphone },
   { target: 'chat', label: 'Chat', icon: MessagesSquare },
   { target: 'estadisticas', label: 'Estadísticas', icon: BarChart3 },
+  { target: 'encuesta', label: 'Encuesta', icon: ClipboardList }, // ENCUESTA-TEMPORAL
   { target: 'uso', label: 'Uso y límites', icon: Gauge },
 ]
 

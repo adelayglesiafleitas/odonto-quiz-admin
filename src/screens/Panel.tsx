@@ -11,6 +11,7 @@ import { Estadisticas } from './Estadisticas'
 import { Preguntas } from './Preguntas'
 import { Chat } from './Chat'
 import { UsoLimites } from './UsoLimites'
+import { Encuesta } from './Encuesta' // ENCUESTA-TEMPORAL
 import { contarPendientesChat, suscribirseAPendientesChat } from '@/lib/chat'
 import { obtenerUso, obtenerConfigUso, LIMITES, nivelDe } from '@/lib/uso'
 
@@ -113,6 +114,8 @@ export function Panel({ correo, userId, rol }: { correo: string; userId: string;
             <Chat adminId={userId} onPendientes={recargarChatPend} />
           ) : vistaEfectiva === 'uso' ? (
             <UsoLimites />
+          ) : vistaEfectiva === 'encuesta' ? ( // ENCUESTA-TEMPORAL
+            <Encuesta usuarios={usuarios} cargandoUsuarios={cargandoUsuarios} miPropioId={userId} />
           ) : vistaEfectiva === 'mensajes' ? (
             <Mensajes usuarios={usuarios} cargandoUsuarios={cargandoUsuarios} />
           ) : (
