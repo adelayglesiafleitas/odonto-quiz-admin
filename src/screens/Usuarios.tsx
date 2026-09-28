@@ -17,7 +17,6 @@ import {
   Unlock,
   ChevronLeft,
   ChevronRight,
-  RefreshCw,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { PanelEstadisticasUsuario } from '@/components/PanelEstadisticasUsuario'
@@ -407,8 +406,8 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
   }
 
   // Aperturas de hoy: consulta propia y ligera, refrescada cada 30 s, para
-  // que "En la app ahora", "Abrieron hoy" y la tarjeta de últimos se muevan
-  // solas sin recargar (ni poner el spinner en) toda la tabla.
+  // que "En la app ahora" y "Abrieron hoy" se muevan solas sin recargar (ni
+  // poner el spinner en) toda la tabla.
   const [aperturasHoy, setAperturasHoy] = useState<{ userId: string; ultimaApertura: string }[] | null>(null)
   const [recargaAperturas, setRecargaAperturas] = useState(0)
   useEffect(() => {
@@ -477,7 +476,7 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
         <p className="mt-1 text-sm text-muted-foreground">Cuentas registradas en el proyecto — datos en vivo desde Supabase.</p>
       </div>
 
-      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <StatCard etiqueta="Total usuarios" valor={stats.total} cargando={cargando} />
         <StatCard etiqueta="En la app ahora" valor={enLaAppAhora} cargando={aperturasHoy === null} vivo />
         <StatCard etiqueta="Abrieron hoy" valor={(aperturasHoy ?? []).length} cargando={aperturasHoy === null} />
@@ -485,13 +484,6 @@ export function Usuarios({ usuarios, cargando, miPropioId, onRecargar }: Props) 
         <StatCard etiqueta="Nuevos esta semana" valor={stats.nuevos} cargando={cargando} />
         <StatCard etiqueta="Admins" valor={stats.admins} cargando={cargando} />
       </div>
-
-      <UltimosEnAbrir
-        aperturas={aperturasHoy}
-        usuarios={usuarios}
-        onActualizar={() => setRecargaAperturas((n) => n + 1)}
-        onVerUsuario={setUsuarioEstadisticas}
-      />
 
       <div className="mb-1 flex flex-wrap items-center gap-2.5">
         <label className="flex h-10 min-w-[200px] flex-1 items-center gap-2 rounded-xl border border-border bg-card px-3 text-muted-foreground">
@@ -841,79 +833,6 @@ function CeldaApertura({ usuario }: { usuario: Usuario }) {
         <span className="text-[11px] text-muted-foreground">{a.relativo}</span>
       </span>
     </span>
-  )
-}
-
-// Tarjeta "Últimos en abrir la app": los 6 más recientes de hoy, con su hora.
-function UltimosEnAbrir({
-  aperturas,
-  usuarios,
-  onActualizar,
-  onVerUsuario,
-}: {
-  aperturas: { userId: string; ultimaApertura: string }[] | null
-  usuarios: Usuario[]
-  onActualizar: () => void
-  onVerUsuario: (u: Usuario) => void
-}) {
-  const porId = new Map(usuarios.map((u) => [u.id, u] as const))
-  const ultimos = (aperturas ?? []).filter((a) => porId.has(a.userId)).slice(0, 6)
-  return (
-    <div className="mb-6 rounded-2xl border border-accent/30 bg-card p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-[13.5px] font-bold text-foreground">Últimos en abrir la app</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">Cada vez que alguien abre o vuelve a la app · se actualiza sola cada 30 s</p>
-        </div>
-        <button
-          type="button"
-          onClick={onActualizar}
-          className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-border px-3 text-[12.5px] font-bold text-foreground transition hover:bg-muted"
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-          Actualizar
-        </button>
-      </div>
-      {aperturas === null ? (
-        <div className="flex justify-center py-6">
-          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-        </div>
-      ) : ultimos.length === 0 ? (
-        <p className="py-6 text-center text-xs text-muted-foreground">Nadie ha abierto la app todavía hoy.</p>
-      ) : (
-        <div className="mt-2 grid gap-x-6 md:grid-cols-2">
-          {ultimos.map((ap) => {
-            const u = porId.get(ap.userId)!
-            const a = formatoApertura(ap.ultimaApertura)
-            const nombre = u.nickname?.trim() || u.email
-            return (
-              <button
-                key={ap.userId}
-                type="button"
-                onClick={() => onVerUsuario(u)}
-                title={a.full}
-                className="flex items-center gap-3 border-t border-border py-2.5 text-left transition hover:bg-muted/40"
-              >
-                <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/15 text-[12px] font-extrabold text-accent">
-                  {nombre.charAt(0).toUpperCase()}
-                  {a.nivel === 'ahora' && (
-                    <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-card bg-success" />
-                  )}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px] font-bold text-foreground">{nombre}</span>
-                  <span className="block text-[11px] text-muted-foreground">{a.relativo}</span>
-                </span>
-                <span className="shrink-0 text-right">
-                  <span className={`block font-mono text-[13px] font-bold ${a.nivel === 'ahora' ? 'text-success' : 'text-foreground'}`}>{a.hora}</span>
-                  <span className="block text-[11px] text-muted-foreground">{a.dia}</span>
-                </span>
-              </button>
-            )
-          })}
-        </div>
-      )}
-    </div>
   )
 }
 
